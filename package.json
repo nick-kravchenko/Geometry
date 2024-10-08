@@ -1,0 +1,59 @@
+{
+  "name": "wtf",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "build": "npm run build:webpack",
+    "build:webpack": "webpack --stats-children --mode production",
+    "start:backend": "tsnd --respawn ./server/index.ts",
+    "start:frontend": "webpack serve --mode development",
+    "start": "npm run start:frontend && npm run start:backend",
+    "eslint": "npx eslint ./**/*.ts",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "**/*.{ts,js}": [
+      "npx eslint --fix",
+      "git add"
+    ]
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@eslint/js": "^9.12.0",
+    "@typescript-eslint/eslint-plugin": "^8.8.0",
+    "@typescript-eslint/parser": "^8.8.0",
+    "@typescript-eslint/utils": "^8.8.0",
+    "css-loader": "^7.1.2",
+    "eslint": "^9.12.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "eslint-webpack-plugin": "^4.2.0",
+    "file-loader": "^6.2.0",
+    "globals": "^15.10.0",
+    "html-webpack-plugin": "^5.6.0",
+    "husky": "^9.1.6",
+    "image-webpack-loader": "^8.1.0",
+    "lint-staged": "^15.2.10",
+    "mini-css-extract-plugin": "^2.9.1",
+    "nodemon": "^3.1.7",
+    "prettier": "^3.3.3",
+    "sass": "^1.79.4",
+    "sass-loader": "^16.0.2",
+    "style-loader": "^4.0.0",
+    "ts-loader": "^9.5.1",
+    "ts-node": "^10.9.2",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.8.0",
+    "webpack": "^5.95.0",
+    "webpack-cli": "^5.1.4",
+    "webpack-dev-server": "^5.1.0"
+  },
+  "dependencies": {
+    "@wasm-tool/wasm-pack-plugin": "^1.7.0",
+    "ws": "^8.18.0"
+  }
+}
