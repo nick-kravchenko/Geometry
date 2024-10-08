@@ -1,6 +1,11 @@
 import { Point } from '../geometry';
 import { numberToPoint } from '../utils/number-to-point';
-import { shotPixelByNumber } from '../utils/shot-pixel-by-number';
+
+type Node = [
+  number, /* The position of the node as a [x, y] coordinate. */
+  number, /* The h value (heuristic estimate to goal). */
+  number, /* The f value (total cost, g + h). */
+];
 
 export function aStar(
   blockedCells: Set<number>,
@@ -10,94 +15,82 @@ export function aStar(
   endNumber: number,
   allowDiagonal: boolean = false
 ): number[] {
-  console.log(`Starting A* with start: ${startNumber}, end: ${endNumber}, width: ${w}, height: ${h}, allowDiagonal: ${allowDiagonal}`);
-  let canvasElement: HTMLCanvasElement = document.getElementById('main-canvas') as HTMLCanvasElement;
-
-  // Parent of each node (parentArr[childNumber] = parentNumber)
-  const parentArr: Float64Array = new Float64Array(w * h).fill(-1);
+  const startNode: Node = [startNumber, 0, 0];
   const closedSet: Uint8Array = new Uint8Array(w * h); // 1 byte per cell for memory efficiency
-  const openedSet: Uint8Array = new Uint8Array(w * h); // 1 byte per cell for memory efficiency
-  const gScoreArr: Float64Array = new Float64Array(w * h).fill(Infinity); // Path cost from start to a node
-  const hScoreArr: Float64Array = new Float64Array(); // Heuristic value for a node
+  const openSet: Set<number> = new Set();
+  const gScore: Float64Array = new Float64Array(w * h).fill(Infinity); // Typed array for better memory performance
+  const openList: Node[] = [startNode];
+  const parentMap: Map<number, number|undefined> = new Map();
+  parentMap.set(startNumber, undefined);
 
-  const fScoreMap: Map<number, number> = new Map(); // Total cost of a node
-        fScoreMap.set(startNumber, calculateHeuristic(startNumber, endNumber, w, allowDiagonal));
+  // Initialize the gScore for the start node
+  gScore[startNumber] = 0;
 
-  function getNodeNumberWithLowestFScore(): number {
-    let minFScore: number = Infinity;
-    let minFScoreNodeNumber: number = -1;
-    for (const [nodeNumber, fScore] of fScoreMap) {
-      console.log({
-        nodeNumber,
-        fScore,
-        minFScore,
-      });
-      if (fScore < minFScore) {
-        minFScore = fScore;
-        minFScoreNodeNumber = nodeNumber;
-      }
-    }
-    return minFScoreNodeNumber;
-  }
+  while (openList.length) { // the destination node is not reached
+    let currentNode: Node = openList.shift() as Node;
 
-  gScoreArr[startNumber] = 0;
-  hScoreArr[startNumber] = calculateHeuristic(startNumber, endNumber, w, allowDiagonal);
-
-  let nodesToTrack: number = 1;
-
-  while (nodesToTrack) { // the destination node is not reached
-    let currentNodeNumber: number = getNodeNumberWithLowestFScore();
-    console.log(`Processing node: ${currentNodeNumber}`);
-    shotPixelByNumber(canvasElement, w, currentNodeNumber, '#ff000010');
-
-    if (currentNodeNumber === endNumber) {
-      console.log('Path found!');
-      return reconstructPath(parentArr, currentNodeNumber);
+    if (currentNode[0] === endNumber) {
+      return reconstructPath(parentMap, currentNode[0]);
     }
 
-    openedSet[currentNodeNumber] = 0; // remove current node from the open set
-    closedSet[currentNodeNumber] = 1; // add current node to the closed set
-    nodesToTrack--;
+    openSet.delete(currentNode[0]);
+
+    // put the current node in the closedSet
+    closedSet[currentNode[0]] = 0;
 
     // get the neighbors of the current node
-    const neighbors: number[] = getNeighbors(currentNodeNumber, w, h, allowDiagonal);
+    const neighbors: number[] = getNeighbors(currentNode[0], w, h, allowDiagonal);
 
     for (const neighbor of neighbors) {
-      console.log(`Processing neighbor: ${neighbor}`);
       // @ts-ignore
-      shotPixelByNumber(canvasElement, w, neighbor, 'red');
+      // window.shotNumber(neighbor, '#0000ff10');
       if (closedSet[neighbor] || blockedCells.has(neighbor)) continue;
 
       // The distance from start to a neighbor
-      const neighborNewGScore: number = (gScoreArr[currentNodeNumber] as number) + 1; // Assuming uniform cost for each move then
-      const neighborOldGScore: number = gScoreArr[neighbor] as number;
+      const tentativeGScore: number = (gScore[currentNode[0]] as number) + 1; // Assuming uniform cost for each move then
 
       // if (neighbor has lower g value than current and is in the closed list) :
-      if (neighborNewGScore < neighborOldGScore) {
-        const neighborHScore: number = calculateHeuristic(neighbor, endNumber, w, allowDiagonal);
-        const neighborFScore: number = neighborNewGScore + neighborHScore;
+      if (tentativeGScore < gScore[neighbor]!) {
+        const hScore: number = calculateHeuristic(neighbor, endNumber, w, allowDiagonal);
+        const fScore: number = tentativeGScore + hScore;
+        const neighborNode: Node = [neighbor, hScore, fScore];
 
-        if (!fScoreMap.has(currentNodeNumber) || fScoreMap.get(currentNodeNumber)! > neighborFScore) {
-          fScoreMap.set(currentNodeNumber, neighborFScore);
-        }
+        parentMap.set(neighbor, currentNode[0]);
 
-        parentArr[neighbor] = currentNodeNumber;
-        gScoreArr[neighbor] = neighborNewGScore;
-        hScoreArr[neighbor] = neighborHScore;
-        fScoreMap.set(neighbor, neighborFScore);
+        gScore[neighbor] = tentativeGScore;
 
         // Add neighbor to the open list if it's not already there
-        if (!openedSet[neighbor]) {
-          openedSet[neighbor] = 1;
-          nodesToTrack++;
+        if (!openSet.has(neighbor)) {
+          insertNodeSorted(openList, neighborNode);
+          openSet.add(neighbor);
         }
       }
     }
   }
 
-  console.log('No path found');
+  // No path found
   return [];
 }
+
+// Function to insert node in sorted order by fScore using binary insertion
+function insertNodeSorted(openList: Node[], newNode: Node): void {
+  let low: number = 0;            // Start of the search space
+  let high: number = openList.length;  // End of the search space (the entire array)
+
+  // Binary search to find the insertion point
+  while (low < high) {
+    const mid = (low + high) >>> 1;  // Calculate the middle index
+    if (openList[mid]![2] < newNode[2]) {  // Compare f values (third element)
+      low = mid + 1;               // Move the low bound up if newNode has a larger f value
+    } else {
+      high = mid;                  // Move the high bound down if newNode has a smaller f value
+    }
+  }
+
+  // Insert the newNode at the found position
+  openList.splice(low, 0, newNode);
+}
+
 
 function getNeighbors(cellNumber: number, w: number, h: number, diagonal: boolean): number[] {
   const neighbors: number[] = [];
@@ -110,6 +103,7 @@ function getNeighbors(cellNumber: number, w: number, h: number, diagonal: boolea
   if (py > 0) neighbors.push(cellNumber - w); // up
   if (py < h - 1) neighbors.push(cellNumber + w); // down
 
+
   // Diagonals
   if (diagonal) {
     if (px > 0 && py > 0) neighbors.push(cellNumber - w - 1);
@@ -117,9 +111,11 @@ function getNeighbors(cellNumber: number, w: number, h: number, diagonal: boolea
     if (px > 0 && py < h - 1) neighbors.push(cellNumber + w - 1);
     if (px < w - 1 && py < h - 1) neighbors.push(cellNumber + w + 1);
   }
+
   return neighbors;
 }
 
+// @ts-ignore
 function calculateHeuristic(point1: number, point2: number, w: number, diagonal: boolean): number {
   const [x1, y1]: Point = numberToPoint(point1, w);
   const [x2, y2]: Point = numberToPoint(point2, w);
@@ -132,13 +128,17 @@ function calculateHeuristic(point1: number, point2: number, w: number, diagonal:
   }
 }
 
-function reconstructPath(parentArr: Float64Array, endNumber: number): number[] {
-  console.log(parentArr);
+function reconstructPath(
+  parentMap: Map<number, number|undefined>,
+  endNumber: number,
+): number[] {
   const path: number[] = [];
   let currentNumber: number|undefined = endNumber;
+
   while (currentNumber !== undefined) {
     path.push(currentNumber);
-    currentNumber = parentArr[currentNumber];
+    currentNumber = parentMap.get(currentNumber);
   }
+
   return path.reverse();
 }

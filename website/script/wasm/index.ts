@@ -19,7 +19,7 @@ import { shotPixelByNumber } from '../utils/shot-pixel-by-number';
   let start: number = performance.now();
   const pathBFSTS: number[] = breadthFirstSearch(blockedCellsNumbers, w, h, startPointNumber, endPointNumber);
   console.log(`BFS TS (${pathBFSTS?.length})`, `${~~(performance.now() - start)} ms`);
-  for (let i = 0; i < pathBFSTS.length; i += 4) {
+  for (let i = 0; i < pathBFSTS.length; i += 8) {
     const px: number = pathBFSTS[i];
     shotPixelByNumber(canvasElement, w, px, 'white');
   }
@@ -31,16 +31,10 @@ import { shotPixelByNumber } from '../utils/shot-pixel-by-number';
   // window.pathBFSWASM = pathBFSWASM;
 
   start = performance.now();
-  const pathAStarTS: number[]|null = aStar(
-    new Set(),
-    10,
-    10,
-    0,
-    99,
-  );
+  const pathAStarTS: number[]|null = aStar(blockedCellsNumbers, w, h, startPointNumber, endPointNumber);
   console.log(`A* TS (${pathAStarTS?.length} elements)`, `${~~(performance.now() - start)} ms`);
   for (let i = 0; i < pathAStarTS.length; i += 1) {
-    const px: number = pathBFSTS[i];
+    const px: number = pathAStarTS[i];
     shotPixelByNumber(canvasElement, w, px, 'red');
   }
 
