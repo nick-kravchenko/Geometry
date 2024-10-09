@@ -13,6 +13,11 @@ module.exports = [
     plugins: {
       '@typescript-eslint': typescriptPlugin,
     },
+    ignores: [
+      "**/node_modules/**",
+      '**/wasm/**',
+      '**/dist/**',
+    ],
     rules: {
       '@typescript-eslint/explicit-function-return-type': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
