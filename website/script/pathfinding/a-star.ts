@@ -20,8 +20,7 @@ export function aStar(
   const openSet: Uint8Array = new Uint8Array(w * h).fill(0);
   const gScoreArray: Float64Array = new Float64Array(w * h).fill(Infinity); // Typed array for better memory performance
   const openList: Node[] = [startNode];
-  const parentMap: Map<number, number|undefined> = new Map();
-  parentMap.set(startNumber, undefined);
+  const parentArray: Float64Array = new Float64Array(w * h).fill(-1);
 
   // Initialize the gScore for the start node
   gScoreArray[startNumber] = 0;
@@ -30,7 +29,7 @@ export function aStar(
     let currentNode: Node = openList.shift() as Node;
 
     if (currentNode[0] === endNumber) {
-      return reconstructPath(parentMap, currentNode[0]);
+      return reconstructPath(parentArray, currentNode[0]);
     }
 
     openSet[currentNode[0]] = 0; // remove the current node from the openSet
@@ -51,8 +50,7 @@ export function aStar(
         const fScore: number = tentativeGScore + hScore;
         const neighborNode: Node = [neighbor, hScore, fScore];
 
-        parentMap.set(neighbor, currentNode[0]);
-
+        parentArray[neighbor] = currentNode[0];
         gScoreArray[neighbor] = tentativeGScore;
 
         // Add neighbor to the open list if it's not already there
@@ -125,7 +123,7 @@ function calculateHeuristic(point1: number, point2: number, w: number, diagonal:
 }
 
 function reconstructPath(
-  parentMap: Map<number, number|undefined>,
+  parentMap: Float64Array,
   endNumber: number,
 ): number[] {
   const path: number[] = [];
@@ -133,7 +131,7 @@ function reconstructPath(
 
   while (currentNumber !== undefined) {
     path.push(currentNumber);
-    currentNumber = parentMap.get(currentNumber);
+    currentNumber = parentMap[currentNumber];
   }
 
   return path.reverse();
