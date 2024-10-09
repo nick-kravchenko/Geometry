@@ -6,17 +6,37 @@ export function breadthFirstSearch(
   end: number,
   diagonal: boolean = false
 ): number[] {
-  const queue: Int32Array = new Int32Array(w * h);
-  queue[0] = start;
-  let queueLength: number = 1;
-  let queueStart: number = 0;  // pointer for the start of the queue, avoid shift()
+  const gridSize: number = w * h;
+  const bufferSize: number = gridSize * 4 * 2 + gridSize;
+  const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
+  const queue: Uint32Array = new Uint32Array(buffer, 0, gridSize);
+  const parents: Uint32Array = new Uint32Array(buffer, gridSize * 4, gridSize);
+  parents.fill(0xFFFF);
+  const blockedCells: Uint8Array = new Uint8Array(buffer, gridSize * 8, gridSize);
+  blockedCells.set(blockedCellsNumbers);
 
-  const parents: Int32Array = new Int32Array(w * h).fill(-2); // Using an array instead of Map
-  parents[start] = -1; // Start has no parent
+  queue[0] = start;
+  parents[start] = -1;
+
+  const maxX: number = w - 1;
+  const maxY: number = h - 1;
+  
+  let queueLength: number = 1;
+  let queueStart: number = 0;
 
   while (queueStart < queueLength) {
-    const currentCell: number = queue[queueStart++] as number;
-    if (currentCell === end) return reconstructPath(parents, end, start);
+    // @ts-expect-error
+    const currentCell: number = queue[queueStart++];
+    if (currentCell === end) {
+      const path: number[] = [];
+      let current: number | undefined = end;
+      while (current && current !== -1) {
+        path.push(current);
+        if (current === start) break;
+        current = parents[current];
+      }
+      return path.reverse();
+    }
     const px: number = currentCell % w;
     const py: number = ~~(currentCell / w);
 
@@ -25,80 +45,89 @@ export function breadthFirstSearch(
     const top: number = currentCell - w;
     const bottom: number = currentCell + w;
 
+    const canMoveLeft: boolean = px > 0;
+    const canMoveRight: boolean = px < maxX;
+    const canMoveUp: boolean = py > 0;
+    const canMoveDown: boolean = py < maxY;
+
     if (
-      px > 0 &&
-      parents[left] === -2 &&
-      blockedCellsNumbers[left] !== 1
+      canMoveLeft &&
+      parents[left] === 0xFFFF &&
+      blockedCells[left] !== 1
     ) { // left
       queue[queueLength++] = left;
       parents[left] = currentCell;
     }
     if (
-      px < w - 1 &&
-      parents[right] === -2 &&
-      blockedCellsNumbers[right] !== 1
+      canMoveRight &&
+      parents[right] === 0xFFFF &&
+      blockedCells[right] !== 1
     ) { // right
       queue[queueLength++] = right;
       parents[right] = currentCell;
     }
     if (
-      py > 0 &&
-      parents[top] === -2 &&
-      blockedCellsNumbers[top] !== 1
+      canMoveUp &&
+      parents[top] === 0xFFFF &&
+      blockedCells[top] !== 1
     ) { // up
       queue[queueLength++] = top;
       parents[top] = currentCell;
     }
     if (
-      py < h - 1 &&
-      parents[bottom] === -2 &&
-      blockedCellsNumbers[bottom] !== 1
+      canMoveDown &&
+      parents[bottom] === 0xFFFF &&
+      blockedCells[bottom] !== 1
     ) { // down
       queue[queueLength++] = bottom;
       parents[bottom] = currentCell;
     }
 
     if (diagonal) {
-      let topLeft: number = currentCell - w - 1;
+      let topLeft: number = currentCell - maxX;
       let topRight: number = currentCell - w + 1;
-      let bottomLeft: number = currentCell + w - 1;
+      let bottomLeft: number = currentCell + maxX;
       let bottomRight: number = currentCell + w + 1;
       if (
-        px > 0 && py > 0 &&
-        parents[topLeft] === -2 &&
-        blockedCellsNumbers[topLeft] !== 1 &&
-        blockedCellsNumbers[top] !== 1 &&
-        blockedCellsNumbers[left] !== 1
+        // @ts-expect-error
+        canMoveUp & canMoveLeft &&
+        parents[topLeft] === 0xFFFF &&
+        blockedCells[topLeft] !== 1 &&
+        blockedCells[top] !== 1 &&
+        blockedCells[left] !== 1
       ) { // top-left
         queue[queueLength++] = topLeft;
         parents[topLeft] = currentCell;
       }
       if (
-        px < w - 1 && py > 0 &&
-        parents[topRight] === -2 &&
-        blockedCellsNumbers[topRight] !== 1 &&
-        blockedCellsNumbers[top] !== 1 &&
-        blockedCellsNumbers[right] !== 1
+        // @ts-expect-error
+        canMoveUp & canMoveRight &&
+        parents[topRight] === 0xFFFF &&
+        blockedCells[topRight] !== 1 &&
+        blockedCells[top] !== 1 &&
+        blockedCells[right] !== 1
       ) { // top-right
         queue[queueLength++] = topRight;
         parents[topRight] = currentCell;
       }
       if (
-        px > 0 && py < h - 1 &&
-        parents[bottomLeft] === -2 &&
-        blockedCellsNumbers[bottomLeft] !== 1 &&
-        blockedCellsNumbers[bottom] !== 1 &&
-        blockedCellsNumbers[left] !== 1
+        // @ts-expect-error
+        canMoveDown & canMoveLeft &&
+        parents[bottomLeft] === 0xFFFF &&
+        blockedCells[bottomLeft] !== 1 &&
+        blockedCells[bottom] !== 1 &&
+        blockedCells[left] !== 1
       ) { // bottom-left
         queue[queueLength++] = bottomLeft;
         parents[bottomLeft] = currentCell;
       }
       if (
-        px < w - 1 && py < h - 1 &&
-        parents[bottomRight] === -2 &&
-        blockedCellsNumbers[bottomRight] !== 1 &&
-        blockedCellsNumbers[bottom] !== 1 &&
-        blockedCellsNumbers[right] !== 1
+        // @ts-expect-error
+        canMoveDown & canMoveRight &&
+        parents[bottomRight] === 0xFFFF &&
+        blockedCells[bottomRight] !== 1 &&
+        blockedCells[bottom] !== 1 &&
+        blockedCells[right] !== 1
       ) { // bottom-right
         queue[queueLength++] = bottomRight;
         parents[bottomRight] = currentCell;
@@ -107,18 +136,4 @@ export function breadthFirstSearch(
   }
 
   return [];
-}
-
-// Reconstruct the path using a parent array
-function reconstructPath(parents: Int32Array, end: number, start: number): number[] {
-  const path: number[] = [];
-
-  let current: number | undefined = end;
-  while (current && current !== -1) { // -1 signifies the start of the path
-    path.push(current);
-    if (current === start) break;
-    current = parents[current];
-  }
-
-  return path.reverse(); // Return the path in reverse order
 }
