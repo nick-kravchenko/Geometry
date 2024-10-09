@@ -27,32 +27,32 @@ export function breadthFirstSearch(
 
     if (
       px > 0 &&
-      blockedCellsNumbers[left] !== 1 &&
-      parents[left] === -2
+      parents[left] === -2 &&
+      blockedCellsNumbers[left] !== 1
     ) { // left
       queue[queueLength++] = left;
       parents[left] = currentCell;
     }
     if (
       px < w - 1 &&
-      blockedCellsNumbers[right] !== 1 &&
-      parents[right] === -2
+      parents[right] === -2 &&
+      blockedCellsNumbers[right] !== 1
     ) { // right
       queue[queueLength++] = right;
       parents[right] = currentCell;
     }
     if (
       py > 0 &&
-      blockedCellsNumbers[top] !== 1 &&
-      parents[top] === -2
+      parents[top] === -2 &&
+      blockedCellsNumbers[top] !== 1
     ) { // up
       queue[queueLength++] = top;
       parents[top] = currentCell;
     }
     if (
       py < h - 1 &&
-      blockedCellsNumbers[bottom] !== 1 &&
-      parents[bottom] === -2
+      parents[bottom] === -2 &&
+      blockedCellsNumbers[bottom] !== 1
     ) { // down
       queue[queueLength++] = bottom;
       parents[bottom] = currentCell;
