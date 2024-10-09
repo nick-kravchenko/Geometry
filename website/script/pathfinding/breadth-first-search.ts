@@ -19,79 +19,88 @@ export function breadthFirstSearch(
     const px: number = currentCell % w;
     const py: number = ~~(currentCell / w);
 
+    const left: number = currentCell - 1;
+    const right: number = currentCell + 1;
+    const top: number = currentCell - w;
+    const bottom: number = currentCell + w;
+
     if (
       px > 0 &&
-      blockedCellsNumbers[currentCell - 1] !== 1 &&
-      parents[currentCell - 1] === -2
+      blockedCellsNumbers[left] !== 1 &&
+      parents[left] === -2
     ) { // left
-      queue.push(currentCell - 1);
-      parents[currentCell - 1] = currentCell;
+      queue.push(left);
+      parents[left] = currentCell;
     }
     if (
       px < w - 1 &&
-      blockedCellsNumbers[currentCell + 1] !== 1 &&
-      parents[currentCell + 1] === -2
+      blockedCellsNumbers[right] !== 1 &&
+      parents[right] === -2
     ) { // right
-      queue.push(currentCell + 1);
-      parents[currentCell + 1] = currentCell;
+      queue.push(right);
+      parents[right] = currentCell;
     }
     if (
       py > 0 &&
-      blockedCellsNumbers[currentCell - w] !== 1 &&
-      parents[currentCell - w] === -2
+      blockedCellsNumbers[top] !== 1 &&
+      parents[top] === -2
     ) { // up
-      queue.push(currentCell - w);
-      parents[currentCell - w] = currentCell;
+      queue.push(top);
+      parents[top] = currentCell;
     }
     if (
       py < h - 1 &&
-      blockedCellsNumbers[currentCell + w] !== 1 &&
-      parents[currentCell + w] === -2
+      blockedCellsNumbers[bottom] !== 1 &&
+      parents[bottom] === -2
     ) { // down
-      queue.push(currentCell + w);
-      parents[currentCell + w] = currentCell;
+      queue.push(bottom);
+      parents[bottom] = currentCell;
     }
 
     if (diagonal) {
+      let topLeft: number = currentCell - w - 1;
+      let topRight: number = currentCell - w + 1;
+      let bottomLeft: number = currentCell + w - 1;
+      let bottomRight: number = currentCell + w + 1;
       if (
         px > 0 && py > 0 &&
-        parents[currentCell - w - 1] === -2 &&
-        blockedCellsNumbers[currentCell - w - 1] !== 1 &&
-        blockedCellsNumbers[currentCell - 1] !== 1 &&
-        blockedCellsNumbers[currentCell - w] !== 1
+        parents[topLeft] === -2 &&
+        blockedCellsNumbers[topLeft] !== 1 &&
+        blockedCellsNumbers[top] !== 1 &&
+        blockedCellsNumbers[left] !== 1
       ) { // top-left
-        queue.push(currentCell - w - 1);
-        parents[currentCell - w - 1] = currentCell;
+        queue.push(topLeft);
+        parents[topLeft] = currentCell;
       }
       if (
         px < w - 1 && py > 0 &&
-        parents[currentCell - w + 1] === -2 &&
-        blockedCellsNumbers[currentCell - w + 1] !== 1 &&
-        blockedCellsNumbers[currentCell + 1] !== 1 &&
-        blockedCellsNumbers[currentCell - w] !== 1
+        parents[topRight] === -2 &&
+        blockedCellsNumbers[topRight] !== 1 &&
+        blockedCellsNumbers[top] !== 1 &&
+        blockedCellsNumbers[right] !== 1
       ) { // top-right
-        queue.push(currentCell - w + 1);
-        parents[currentCell - w + 1] = currentCell;
+        queue.push(topRight);
+        parents[topRight] = currentCell;
       }
       if (
         px > 0 && py < h - 1 &&
-        parents[currentCell + w - 1] === -2 &&
-        blockedCellsNumbers[currentCell + w - 1] !== 1 &&
-        blockedCellsNumbers[currentCell - 1] !== 1 &&
-        blockedCellsNumbers[currentCell + w] !== 1
+        parents[bottomLeft] === -2 &&
+        blockedCellsNumbers[bottomLeft] !== 1 &&
+        blockedCellsNumbers[bottom] !== 1 &&
+        blockedCellsNumbers[left] !== 1
       ) { // bottom-left
-        queue.push(currentCell + w - 1);
-        parents[currentCell + w - 1] = currentCell;
+        queue.push(bottomLeft);
+        parents[bottomLeft] = currentCell;
       }
       if (
         px < w - 1 && py < h - 1 &&
-        parents[currentCell + w + 1] === -2 &&
-        blockedCellsNumbers[currentCell + w + 1] !== 1 &&
-        blockedCellsNumbers[currentCell + 1] !== 1 &&
-        blockedCellsNumbers[currentCell + w] !== 1
+        parents[bottomRight] === -2 &&
+        blockedCellsNumbers[bottomRight] !== 1 &&
+        blockedCellsNumbers[bottom] !== 1 &&
+        blockedCellsNumbers[right] !== 1
       ) { // bottom-right
-        queue.push(currentCell + w + 1);
-        parents[currentCell + w + 1] = currentCell;
+        queue.push(bottomRight);
+        parents[bottomRight] = currentCell;
       }
     }
   }
