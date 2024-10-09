@@ -1,21 +1,20 @@
+use std::collections::VecDeque;
+
 pub fn breadth_first_search(
   blocked_cells_numbers: &[u8],
-  w: usize,
-  h: usize,
-  start: usize,
-  end: usize,
+  w: u32,
+  h: u32,
+  start: u32,
+  end: u32,
   diagonal: bool,
-) -> Vec<usize> {
-  let mut queue: Vec<usize> = vec![start];
-  let mut queue_start = 0; // pointer for the start of the queue
+) -> Vec<u32> {
+  let mut queue: VecDeque<u32> = VecDeque::with_capacity((w * h) as usize); // Use VecDeque for faster dequeuing
+  queue.push_back(start);
 
-  let mut parents: Vec<isize> = vec![-2; w * h]; // Using a vector instead of a map
-  parents[start] = -1; // Start has no parent
+  let mut parents: Vec<i32> = vec![-2; (w * h) as usize]; // Track parents, initialized to -2
+  parents[start as usize] = -1; // Start has no parent
 
-  while queue_start < queue.len() {
-    let current_cell = queue[queue_start];
-    queue_start += 1;
-
+  while let Some(current_cell) = queue.pop_front() {
     if current_cell == end {
       return reconstruct_path(&parents, end, start);
     }
@@ -23,83 +22,88 @@ pub fn breadth_first_search(
     let px = current_cell % w;
     let py = current_cell / w;
 
-    if px > 0 && blocked_cells_numbers[current_cell - 1] != 1 && parents[current_cell - 1] == -2 {
-      // left
-      queue.push(current_cell - 1);
-      parents[current_cell - 1] = current_cell as isize;
+    // Check left
+    if px > 0 && blocked_cells_numbers[(current_cell - 1) as usize] != 1 && parents[(current_cell - 1) as usize] == -2 {
+      queue.push_back(current_cell - 1);
+      parents[(current_cell - 1) as usize] = current_cell as i32;
     }
-    if px < w - 1 && blocked_cells_numbers[current_cell + 1] != 1 && parents[current_cell + 1] == -2 {
-      // right
-      queue.push(current_cell + 1);
-      parents[current_cell + 1] = current_cell as isize;
+    // Check right
+    if px < w - 1 && blocked_cells_numbers[(current_cell + 1) as usize] != 1 && parents[(current_cell + 1) as usize] == -2 {
+      queue.push_back(current_cell + 1);
+      parents[(current_cell + 1) as usize] = current_cell as i32;
     }
-    if py > 0 && blocked_cells_numbers[current_cell - w] != 1 && parents[current_cell - w] == -2 {
-      // up
-      queue.push(current_cell - w);
-      parents[current_cell - w] = current_cell as isize;
+    // Check up
+    if py > 0 && blocked_cells_numbers[(current_cell - w) as usize] != 1 && parents[(current_cell - w) as usize] == -2 {
+      queue.push_back(current_cell - w);
+      parents[(current_cell - w) as usize] = current_cell as i32;
     }
-    if py < h - 1 && blocked_cells_numbers[current_cell + w] != 1 && parents[current_cell + w] == -2 {
-      // down
-      queue.push(current_cell + w);
-      parents[current_cell + w] = current_cell as isize;
+    // Check down
+    if py < h - 1 && blocked_cells_numbers[(current_cell + w) as usize] != 1 && parents[(current_cell + w) as usize] == -2 {
+      queue.push_back(current_cell + w);
+      parents[(current_cell + w) as usize] = current_cell as i32;
     }
 
+    // Diagonal movement
     if diagonal {
-      if px > 0 && py > 0 && parents[current_cell - w - 1] == -2 &&
-        blocked_cells_numbers[current_cell - w - 1] != 1 &&
-        blocked_cells_numbers[current_cell - 1] != 1 &&
-        blocked_cells_numbers[current_cell - w] != 1
+      // Check top-left
+      if px > 0 && py > 0 &&
+        blocked_cells_numbers[(current_cell - w - 1) as usize] != 1 &&
+        parents[(current_cell - w - 1) as usize] == -2 &&
+        blocked_cells_numbers[(current_cell - 1) as usize] != 1 &&
+        blocked_cells_numbers[(current_cell - w) as usize] != 1
       {
-        // top-left
-        queue.push(current_cell - w - 1);
-        parents[current_cell - w - 1] = current_cell as isize;
+        queue.push_back(current_cell - w - 1);
+        parents[(current_cell - w - 1) as usize] = current_cell as i32;
       }
-      if px < w - 1 && py > 0 && parents[current_cell - w + 1] == -2 &&
-        blocked_cells_numbers[current_cell - w + 1] != 1 &&
-        blocked_cells_numbers[current_cell + 1] != 1 &&
-        blocked_cells_numbers[current_cell - w] != 1
+      // Check top-right
+      if px < w - 1 && py > 0 &&
+        blocked_cells_numbers[(current_cell - w + 1) as usize] != 1 &&
+        parents[(current_cell - w + 1) as usize] == -2 &&
+        blocked_cells_numbers[(current_cell + 1) as usize] != 1 &&
+        blocked_cells_numbers[(current_cell - w) as usize] != 1
       {
-        // top-right
-        queue.push(current_cell - w + 1);
-        parents[current_cell - w + 1] = current_cell as isize;
+        queue.push_back(current_cell - w + 1);
+        parents[(current_cell - w + 1) as usize] = current_cell as i32;
       }
-      if px > 0 && py < h - 1 && parents[current_cell + w - 1] == -2 &&
-        blocked_cells_numbers[current_cell + w - 1] != 1 &&
-        blocked_cells_numbers[current_cell - 1] != 1 &&
-        blocked_cells_numbers[current_cell + w] != 1
+      // Check bottom-left
+      if px > 0 && py < h - 1 &&
+        blocked_cells_numbers[(current_cell + w - 1) as usize] != 1 &&
+        parents[(current_cell + w - 1) as usize] == -2 &&
+        blocked_cells_numbers[(current_cell - 1) as usize] != 1 &&
+        blocked_cells_numbers[(current_cell + w) as usize] != 1
       {
-        // bottom-left
-        queue.push(current_cell + w - 1);
-        parents[current_cell + w - 1] = current_cell as isize;
+        queue.push_back(current_cell + w - 1);
+        parents[(current_cell + w - 1) as usize] = current_cell as i32;
       }
-      if px < w - 1 && py < h - 1 && parents[current_cell + w + 1] == -2 &&
-        blocked_cells_numbers[current_cell + w + 1] != 1 &&
-        blocked_cells_numbers[current_cell + 1] != 1 &&
-        blocked_cells_numbers[current_cell + w] != 1
+      // Check bottom-right
+      if px < w - 1 && py < h - 1 &&
+        blocked_cells_numbers[(current_cell + w + 1) as usize] != 1 &&
+        parents[(current_cell + w + 1) as usize] == -2 &&
+        blocked_cells_numbers[(current_cell + 1) as usize] != 1 &&
+        blocked_cells_numbers[(current_cell + w) as usize] != 1
       {
-        // bottom-right
-        queue.push(current_cell + w + 1);
-        parents[current_cell + w + 1] = current_cell as isize;
+        queue.push_back(current_cell + w + 1);
+        parents[(current_cell + w + 1) as usize] = current_cell as i32;
       }
     }
   }
 
-  vec![]
+  Vec::new() // Return an empty path if no solution is found
 }
 
 // Reconstruct the path using a parent array
-fn reconstruct_path(parents: &[isize], end: usize, start: usize) -> Vec<usize> {
-  let mut path: Vec<usize> = Vec::new();
-  let mut current = end as isize;
+fn reconstruct_path(parents: &[i32], end: u32, start: u32) -> Vec<u32> {
+  let mut path: Vec<u32> = Vec::new();
+  let mut current = end as i32;
 
   while current != -1 {
-    path.push(current as usize);
-    if current == start as isize {
+    path.push(current as u32);
+    if current == start as i32 {
       break;
     }
     current = parents[current as usize];
   }
 
-  path.reverse();
+  path.reverse(); // Reverse the path to get it in the correct order
   path
 }
