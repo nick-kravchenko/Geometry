@@ -13,13 +13,14 @@ pub fn main() {
 
 #[wasm_bindgen]
 pub fn wasm_breadth_first_search(
-  blocked_cells_numbers: &[usize],
+  blocked_cells_numbers: &[u8], // Adjusted the type to match the earlier function
   w: usize,
   h: usize,
   start: usize,
   end: usize,
+  diagonal: bool, // Added diagonal flag to match the original logic
 ) -> Vec<usize> {
-  breadth_first_search(blocked_cells_numbers, w, h, start, end)
+  breadth_first_search(blocked_cells_numbers, w, h, start, end, diagonal)
 }
 
 #[wasm_bindgen]

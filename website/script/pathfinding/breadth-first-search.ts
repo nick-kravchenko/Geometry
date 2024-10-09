@@ -7,7 +7,7 @@ export function breadthFirstSearch(
   diagonal: boolean = false
 ): number[] {
   const queue: number[] = [start];
-  let queueStart = 0;  // pointer for the start of the queue, avoid shift()
+  let queueStart: number = 0;  // pointer for the start of the queue, avoid shift()
 
   const parents: number[] = new Array(w * h).fill(-2); // Using an array instead of Map
   parents[start] = -1; // Start has no parent
