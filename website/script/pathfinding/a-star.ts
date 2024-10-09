@@ -8,7 +8,7 @@ type Node = [
 ];
 
 export function aStar(
-  blockedCells: Set<number>,
+  blockedCells: Uint8Array,
   w: number,
   h: number,
   startNumber: number,
@@ -16,15 +16,15 @@ export function aStar(
   allowDiagonal: boolean = false
 ): number[] {
   const startNode: Node = [startNumber, 0, 0];
-  const closedSet: Uint8Array = new Uint8Array(w * h); // 1 byte per cell for memory efficiency
-  const openSet: Set<number> = new Set();
-  const gScore: Float64Array = new Float64Array(w * h).fill(Infinity); // Typed array for better memory performance
+  const closedSet: Uint8Array = new Uint8Array(w * h).fill(0); // 1 byte per cell for memory efficiency
+  const openSet: Uint8Array = new Uint8Array(w * h).fill(0);
+  const gScoreArray: Float64Array = new Float64Array(w * h).fill(Infinity); // Typed array for better memory performance
   const openList: Node[] = [startNode];
   const parentMap: Map<number, number|undefined> = new Map();
   parentMap.set(startNumber, undefined);
 
   // Initialize the gScore for the start node
-  gScore[startNumber] = 0;
+  gScoreArray[startNumber] = 0;
 
   while (openList.length) { // the destination node is not reached
     let currentNode: Node = openList.shift() as Node;
@@ -33,36 +33,32 @@ export function aStar(
       return reconstructPath(parentMap, currentNode[0]);
     }
 
-    openSet.delete(currentNode[0]);
-
-    // put the current node in the closedSet
-    closedSet[currentNode[0]] = 0;
+    openSet[currentNode[0]] = 0; // remove the current node from the openSet
+    closedSet[currentNode[0]] = 1; // put the current node in the closedSet
 
     // get the neighbors of the current node
     const neighbors: number[] = getNeighbors(currentNode[0], w, h, allowDiagonal);
 
     for (const neighbor of neighbors) {
-      // @ts-ignore
-      // window.shotNumber(neighbor, '#0000ff10');
-      if (closedSet[neighbor] || blockedCells.has(neighbor)) continue;
+      if (closedSet[neighbor] || blockedCells[neighbor] === 1) continue;
 
       // The distance from start to a neighbor
-      const tentativeGScore: number = (gScore[currentNode[0]] as number) + 1; // Assuming uniform cost for each move then
+      const tentativeGScore: number = (gScoreArray[currentNode[0]] as number) + 1;
 
       // if (neighbor has lower g value than current and is in the closed list) :
-      if (tentativeGScore < gScore[neighbor]!) {
+      if (tentativeGScore < gScoreArray[neighbor]!) {
         const hScore: number = calculateHeuristic(neighbor, endNumber, w, allowDiagonal);
         const fScore: number = tentativeGScore + hScore;
         const neighborNode: Node = [neighbor, hScore, fScore];
 
         parentMap.set(neighbor, currentNode[0]);
 
-        gScore[neighbor] = tentativeGScore;
+        gScoreArray[neighbor] = tentativeGScore;
 
         // Add neighbor to the open list if it's not already there
-        if (!openSet.has(neighbor)) {
+        if (openSet[neighbor] !== 1) {
           insertNodeSorted(openList, neighborNode);
-          openSet.add(neighbor);
+          openSet[neighbor] = 1;
         }
       }
     }

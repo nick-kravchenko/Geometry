@@ -1,27 +1,33 @@
-// @ts-nocheck
+// @ts-expect-error
 import init, { wasm_breadth_first_search, wasm_a_star_search } from '../../../wasm/pkg';
 import { aStar, breadthFirstSearch } from '../pathfinding';
-import { getParams } from './obstacles';
 import { shotPixelByNumber } from '../utils/shot-pixel-by-number';
+import {
+  getField1
+} from '../data';
+
+let {
+  canvasElement,
+  w,
+  h,
+  startPointNumber,
+  endPointNumber,
+  blockedCellsUint8Array,
+} = getField1();
 
 (async (): Promise<void> => {
   await init();
 
-  const {
-    w,
-    h,
-    startPointNumber,
-    endPointNumber,
-    blockedCellsNumbers,
-  } = getParams();
-  let canvasElement: HTMLCanvasElement = document.getElementById('main-canvas') as HTMLCanvasElement;
-
   let start: number = performance.now();
-  const pathBFSTS: number[] = breadthFirstSearch(blockedCellsNumbers, w, h, startPointNumber, endPointNumber);
-  console.log(`BFS TS (${pathBFSTS?.length})`, `${~~(performance.now() - start)} ms`);
-  for (let i = 0; i < pathBFSTS.length; i += 8) {
-    const px: number = pathBFSTS[i];
-    shotPixelByNumber(canvasElement, w, px, 'white');
+  const pathBFSTS: number[] = breadthFirstSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false);
+  console.log(`[TS] Breadth-first search (${pathBFSTS?.length} elements)`, `${~~(performance.now() - start)} ms`);
+
+  start = performance.now();
+  const pathAStarTS: number[]|null = aStar(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false);
+  console.log(`[TS] A-Star search (${pathAStarTS?.length} elements)`, `${~~(performance.now() - start)} ms`);
+  for (let i = 0; i < pathAStarTS.length; i += 1) {
+    const px: number = pathAStarTS[i] as number;
+    shotPixelByNumber(canvasElement, w, px, 'hsla(0, 100%, 50%, .5)');
   }
 
   // start = performance.now();
@@ -29,14 +35,6 @@ import { shotPixelByNumber } from '../utils/shot-pixel-by-number';
   // console.log(`BFS WASM (${pathBFSWASM?.length})`, `${~~(performance.now() - start)} ms`);
   // // @ts-ignore
   // window.pathBFSWASM = pathBFSWASM;
-
-  start = performance.now();
-  const pathAStarTS: number[]|null = aStar(blockedCellsNumbers, w, h, startPointNumber, endPointNumber);
-  console.log(`A* TS (${pathAStarTS?.length} elements)`, `${~~(performance.now() - start)} ms`);
-  for (let i = 0; i < pathAStarTS.length; i += 1) {
-    const px: number = pathAStarTS[i];
-    shotPixelByNumber(canvasElement, w, px, 'red');
-  }
 
   // start = performance.now();
   // const pathAStarWASM: Uint32Array = wasm_a_star_search(blockedNodes, w, h, startPointNumber, endPointNumber);

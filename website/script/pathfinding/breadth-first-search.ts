@@ -1,5 +1,5 @@
 export function breadthFirstSearch(
-  blockedCellsNumbers: Set<number>,
+  blockedCellsNumbers: Uint8Array,
   w: number,
   h: number,
   start: number,
@@ -21,7 +21,7 @@ export function breadthFirstSearch(
 
     if (
       px > 0 &&
-      !blockedCellsNumbers.has(currentCell - 1) &&
+      blockedCellsNumbers[currentCell - 1] !== 1 &&
       parents[currentCell - 1] === -2
     ) { // left
       queue.push(currentCell - 1);
@@ -29,7 +29,7 @@ export function breadthFirstSearch(
     }
     if (
       px < w - 1 &&
-      !blockedCellsNumbers.has(currentCell + 1) &&
+      blockedCellsNumbers[currentCell + 1] !== 1 &&
       parents[currentCell + 1] === -2
     ) { // right
       queue.push(currentCell + 1);
@@ -37,7 +37,7 @@ export function breadthFirstSearch(
     }
     if (
       py > 0 &&
-      !blockedCellsNumbers.has(currentCell - w) &&
+      blockedCellsNumbers[currentCell - w] !== 1 &&
       parents[currentCell - w] === -2
     ) { // up
       queue.push(currentCell - w);
@@ -45,7 +45,7 @@ export function breadthFirstSearch(
     }
     if (
       py < h - 1 &&
-      !blockedCellsNumbers.has(currentCell + w) &&
+      blockedCellsNumbers[currentCell + w] !== 1 &&
       parents[currentCell + w] === -2
     ) { // down
       queue.push(currentCell + w);
@@ -56,9 +56,9 @@ export function breadthFirstSearch(
       if (
         px > 0 && py > 0 &&
         parents[currentCell - w - 1] === -2 &&
-        !blockedCellsNumbers.has(currentCell - w - 1) &&
-        !blockedCellsNumbers.has(currentCell - 1) &&
-        !blockedCellsNumbers.has(currentCell - w)
+        blockedCellsNumbers[currentCell - w - 1] !== 1 &&
+        blockedCellsNumbers[currentCell - 1] !== 1 &&
+        blockedCellsNumbers[currentCell - w] !== 1
       ) { // top-left
         queue.push(currentCell - w - 1);
         parents[currentCell - w - 1] = currentCell;
@@ -66,9 +66,9 @@ export function breadthFirstSearch(
       if (
         px < w - 1 && py > 0 &&
         parents[currentCell - w + 1] === -2 &&
-        !blockedCellsNumbers.has(currentCell - w + 1) &&
-        !blockedCellsNumbers.has(currentCell + 1) &&
-        !blockedCellsNumbers.has(currentCell - w)
+        blockedCellsNumbers[currentCell - w + 1] !== 1 &&
+        blockedCellsNumbers[currentCell + 1] !== 1 &&
+        blockedCellsNumbers[currentCell - w] !== 1
       ) { // top-right
         queue.push(currentCell - w + 1);
         parents[currentCell - w + 1] = currentCell;
@@ -76,9 +76,9 @@ export function breadthFirstSearch(
       if (
         px > 0 && py < h - 1 &&
         parents[currentCell + w - 1] === -2 &&
-        !blockedCellsNumbers.has(currentCell + w - 1) &&
-        !blockedCellsNumbers.has(currentCell - 1) &&
-        !blockedCellsNumbers.has(currentCell + w)
+        blockedCellsNumbers[currentCell + w - 1] !== 1 &&
+        blockedCellsNumbers[currentCell - 1] !== 1 &&
+        blockedCellsNumbers[currentCell + w] !== 1
       ) { // bottom-left
         queue.push(currentCell + w - 1);
         parents[currentCell + w - 1] = currentCell;
@@ -86,9 +86,9 @@ export function breadthFirstSearch(
       if (
         px < w - 1 && py < h - 1 &&
         parents[currentCell + w + 1] === -2 &&
-        !blockedCellsNumbers.has(currentCell + w + 1) &&
-        !blockedCellsNumbers.has(currentCell + 1) &&
-        !blockedCellsNumbers.has(currentCell + w)
+        blockedCellsNumbers[currentCell + w + 1] !== 1 &&
+        blockedCellsNumbers[currentCell + 1] !== 1 &&
+        blockedCellsNumbers[currentCell + w] !== 1
       ) { // bottom-right
         queue.push(currentCell + w + 1);
         parents[currentCell + w + 1] = currentCell;
