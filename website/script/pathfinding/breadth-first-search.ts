@@ -6,15 +6,16 @@ export function breadthFirstSearch(
   end: number,
   diagonal: boolean = false
 ): number[] {
-  const queue: number[] = [start];
+  const queue: Int32Array = new Int32Array(w * h);
+  queue[0] = start;
+  let queueLength: number = 1;
   let queueStart: number = 0;  // pointer for the start of the queue, avoid shift()
 
-  const parents: number[] = new Array(w * h).fill(-2); // Using an array instead of Map
+  const parents: Int32Array = new Int32Array(w * h).fill(-2); // Using an array instead of Map
   parents[start] = -1; // Start has no parent
 
-  while (queueStart < queue.length) {
-    const currentCell: number|undefined = queue[queueStart++];
-    if (currentCell === undefined) break;
+  while (queueStart < queueLength) {
+    const currentCell: number = queue[queueStart++] as number;
     if (currentCell === end) return reconstructPath(parents, end, start);
     const px: number = currentCell % w;
     const py: number = ~~(currentCell / w);
@@ -29,7 +30,7 @@ export function breadthFirstSearch(
       blockedCellsNumbers[left] !== 1 &&
       parents[left] === -2
     ) { // left
-      queue.push(left);
+      queue[queueLength++] = left;
       parents[left] = currentCell;
     }
     if (
@@ -37,7 +38,7 @@ export function breadthFirstSearch(
       blockedCellsNumbers[right] !== 1 &&
       parents[right] === -2
     ) { // right
-      queue.push(right);
+      queue[queueLength++] = right;
       parents[right] = currentCell;
     }
     if (
@@ -45,7 +46,7 @@ export function breadthFirstSearch(
       blockedCellsNumbers[top] !== 1 &&
       parents[top] === -2
     ) { // up
-      queue.push(top);
+      queue[queueLength++] = top;
       parents[top] = currentCell;
     }
     if (
@@ -53,7 +54,7 @@ export function breadthFirstSearch(
       blockedCellsNumbers[bottom] !== 1 &&
       parents[bottom] === -2
     ) { // down
-      queue.push(bottom);
+      queue[queueLength++] = bottom;
       parents[bottom] = currentCell;
     }
 
@@ -69,7 +70,7 @@ export function breadthFirstSearch(
         blockedCellsNumbers[top] !== 1 &&
         blockedCellsNumbers[left] !== 1
       ) { // top-left
-        queue.push(topLeft);
+        queue[queueLength++] = topLeft;
         parents[topLeft] = currentCell;
       }
       if (
@@ -79,7 +80,7 @@ export function breadthFirstSearch(
         blockedCellsNumbers[top] !== 1 &&
         blockedCellsNumbers[right] !== 1
       ) { // top-right
-        queue.push(topRight);
+        queue[queueLength++] = topRight;
         parents[topRight] = currentCell;
       }
       if (
@@ -89,7 +90,7 @@ export function breadthFirstSearch(
         blockedCellsNumbers[bottom] !== 1 &&
         blockedCellsNumbers[left] !== 1
       ) { // bottom-left
-        queue.push(bottomLeft);
+        queue[queueLength++] = bottomLeft;
         parents[bottomLeft] = currentCell;
       }
       if (
@@ -99,7 +100,7 @@ export function breadthFirstSearch(
         blockedCellsNumbers[bottom] !== 1 &&
         blockedCellsNumbers[right] !== 1
       ) { // bottom-right
-        queue.push(bottomRight);
+        queue[queueLength++] = bottomRight;
         parents[bottomRight] = currentCell;
       }
     }
@@ -109,7 +110,7 @@ export function breadthFirstSearch(
 }
 
 // Reconstruct the path using a parent array
-function reconstructPath(parents: number[], end: number, start: number): number[] {
+function reconstructPath(parents: Int32Array, end: number, start: number): number[] {
   const path: number[] = [];
 
   let current: number | undefined = end;
