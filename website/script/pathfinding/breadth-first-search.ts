@@ -11,9 +11,9 @@ export function breadthFirstSearch(
   const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
   const queue: Uint32Array = new Uint32Array(buffer, 0, gridSize);
   const parents: Uint32Array = new Uint32Array(buffer, gridSize * 4, gridSize);
-  parents.fill(0xFFFF);
+        parents.fill(0xFFFFFFFF);
   const blockedCells: Uint8Array = new Uint8Array(buffer, gridSize * 8, gridSize);
-  blockedCells.set(blockedCellsNumbers);
+        blockedCells.set(blockedCellsNumbers);
 
   queue[0] = start;
   parents[start] = -1;
@@ -53,7 +53,7 @@ export function breadthFirstSearch(
 
     if (
       canMoveLeft &&
-      parents[left] === 0xFFFF &&
+      parents[left] === 0xFFFFFFFF &&
       blockedCells[left] !== 1
     ) { // left
       queue[queueLength++] = left;
@@ -61,7 +61,7 @@ export function breadthFirstSearch(
     }
     if (
       canMoveRight &&
-      parents[right] === 0xFFFF &&
+      parents[right] === 0xFFFFFFFF &&
       blockedCells[right] !== 1
     ) { // right
       queue[queueLength++] = right;
@@ -69,7 +69,7 @@ export function breadthFirstSearch(
     }
     if (
       canMoveUp &&
-      parents[top] === 0xFFFF &&
+      parents[top] === 0xFFFFFFFF &&
       blockedCells[top] !== 1
     ) { // up
       queue[queueLength++] = top;
@@ -77,7 +77,7 @@ export function breadthFirstSearch(
     }
     if (
       canMoveDown &&
-      parents[bottom] === 0xFFFF &&
+      parents[bottom] === 0xFFFFFFFF &&
       blockedCells[bottom] !== 1
     ) { // down
       queue[queueLength++] = bottom;
@@ -92,7 +92,7 @@ export function breadthFirstSearch(
       if (
         // @ts-expect-error
         canMoveUp & canMoveLeft &&
-        parents[topLeft] === 0xFFFF &&
+        parents[topLeft] === 0xFFFFFFFF &&
         blockedCells[topLeft] !== 1 &&
         blockedCells[top] !== 1 &&
         blockedCells[left] !== 1
@@ -103,7 +103,7 @@ export function breadthFirstSearch(
       if (
         // @ts-expect-error
         canMoveUp & canMoveRight &&
-        parents[topRight] === 0xFFFF &&
+        parents[topRight] === 0xFFFFFFFF &&
         blockedCells[topRight] !== 1 &&
         blockedCells[top] !== 1 &&
         blockedCells[right] !== 1
@@ -114,7 +114,7 @@ export function breadthFirstSearch(
       if (
         // @ts-expect-error
         canMoveDown & canMoveLeft &&
-        parents[bottomLeft] === 0xFFFF &&
+        parents[bottomLeft] === 0xFFFFFFFF &&
         blockedCells[bottomLeft] !== 1 &&
         blockedCells[bottom] !== 1 &&
         blockedCells[left] !== 1
@@ -125,7 +125,7 @@ export function breadthFirstSearch(
       if (
         // @ts-expect-error
         canMoveDown & canMoveRight &&
-        parents[bottomRight] === 0xFFFF &&
+        parents[bottomRight] === 0xFFFFFFFF &&
         blockedCells[bottomRight] !== 1 &&
         blockedCells[bottom] !== 1 &&
         blockedCells[right] !== 1

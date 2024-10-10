@@ -20,18 +20,18 @@ export function aStar(
   const queue: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
         bufferOffset += gridSize * 4;
   const parents: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
-        parents.fill(0xFFFF);
+        parents.fill(0xFFFFFFFF);
         bufferOffset += gridSize * 4;
   const blockedCells: Uint8Array = new Uint8Array(buffer, bufferOffset, gridSize);
         blockedCells.set(blockedCellsNumbers);
         bufferOffset += gridSize;
   // gScoreArray - cost of the cheapest path to reach the cell
   const gScoreArray: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
-        gScoreArray.fill(0xFFFF);
+        gScoreArray.fill(0xFFFFFFFF);
         bufferOffset += gridSize * 4;
   // hScoreArray - heuristic value to reach the end cell
   const hScoreArray: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
-        hScoreArray.fill(0xFFFF);
+        hScoreArray.fill(0xFFFFFFFF);
         bufferOffset += gridSize * 4;
   // fScoreArray - sum of gScore and hScore (heuristic value of the path)
   const fScoreArray: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
@@ -141,7 +141,7 @@ function getNeighbors(
 
   if (
     canMoveLeft &&
-    parents[left] === 0xFFFF &&
+    parents[left] === 0xFFFFFFFF &&
     blockedCells[left] !== 1
   ) { // left
     neighbors.push(left);
@@ -149,7 +149,7 @@ function getNeighbors(
   }
   if (
     canMoveRight &&
-    parents[right] === 0xFFFF &&
+    parents[right] === 0xFFFFFFFF &&
     blockedCells[right] !== 1
   ) { // right
     neighbors.push(right);
@@ -157,7 +157,7 @@ function getNeighbors(
   }
   if (
     canMoveUp &&
-    parents[top] === 0xFFFF &&
+    parents[top] === 0xFFFFFFFF &&
     blockedCells[top] !== 1
   ) { // up
     neighbors.push(top);
@@ -165,7 +165,7 @@ function getNeighbors(
   }
   if (
     canMoveDown &&
-    parents[bottom] === 0xFFFF &&
+    parents[bottom] === 0xFFFFFFFF &&
     blockedCells[bottom] !== 1
   ) { // down
     neighbors.push(bottom);
@@ -180,7 +180,7 @@ function getNeighbors(
     if (
       // @ts-expect-error
       canMoveUp & canMoveLeft &&
-      parents[topLeft] === 0xFFFF &&
+      parents[topLeft] === 0xFFFFFFFF &&
       blockedCells[topLeft] !== 1 &&
       blockedCells[top] !== 1 &&
       blockedCells[left] !== 1
@@ -191,7 +191,7 @@ function getNeighbors(
     if (
       // @ts-expect-error
       canMoveUp & canMoveRight &&
-      parents[topRight] === 0xFFFF &&
+      parents[topRight] === 0xFFFFFFFF &&
       blockedCells[topRight] !== 1 &&
       blockedCells[top] !== 1 &&
       blockedCells[right] !== 1
@@ -202,7 +202,7 @@ function getNeighbors(
     if (
       // @ts-expect-error
       canMoveDown & canMoveLeft &&
-      parents[bottomLeft] === 0xFFFF &&
+      parents[bottomLeft] === 0xFFFFFFFF &&
       blockedCells[bottomLeft] !== 1 &&
       blockedCells[bottom] !== 1 &&
       blockedCells[left] !== 1
@@ -213,7 +213,7 @@ function getNeighbors(
     if (
       // @ts-expect-error
       canMoveDown & canMoveRight &&
-      parents[bottomRight] === 0xFFFF &&
+      parents[bottomRight] === 0xFFFFFFFF &&
       blockedCells[bottomRight] !== 1 &&
       blockedCells[bottom] !== 1 &&
       blockedCells[right] !== 1
