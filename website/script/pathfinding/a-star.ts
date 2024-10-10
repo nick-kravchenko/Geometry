@@ -1,138 +1,227 @@
-import { Point } from '../geometry';
 import { numberToPoint } from '../utils/number-to-point';
 
-type Node = [
-  number, /* The position of the node as a [x, y] coordinate. */
-  number, /* The h value (heuristic estimate to goal). */
-  number, /* The f value (total cost, g + h). */
-];
-
 export function aStar(
-  blockedCells: Uint8Array,
+  blockedCellsNumbers: Uint8Array,
   w: number,
   h: number,
-  startNumber: number,
-  endNumber: number,
-  allowDiagonal: boolean = false
+  start: number,
+  end: number,
+  diagonal: boolean = false
 ): number[] {
-  const startNode: Node = [startNumber, 0, 0];
-  const closedSet: Uint8Array = new Uint8Array(w * h).fill(0); // 1 byte per cell for memory efficiency
-  const openSet: Uint8Array = new Uint8Array(w * h).fill(0);
-  const gScoreArray: Float64Array = new Float64Array(w * h).fill(Infinity); // Typed array for better memory performance
-  const openList: Node[] = [startNode];
-  const parentArray: Float64Array = new Float64Array(w * h).fill(-1);
+  const gridSize: number = w * h;
+  const bufferSize: number = (gridSize << 2) // queue (32bit array)
+                           + (gridSize << 2) // parents (32bit array)
+                           + (gridSize << 0) // blockedCells (8bit array)
+                           + (gridSize << 2) // gScoreArray (32bit array)
+                           + (gridSize << 2) // fScoreArray (32bit array)
+                           + (gridSize << 2); // hScoreArray (32bit array)
+  let bufferOffset: number = 0;
+  const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
+  const queue: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
+        bufferOffset += gridSize * 4;
+  const parents: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
+        parents.fill(0xFFFF);
+        bufferOffset += gridSize * 4;
+  const blockedCells: Uint8Array = new Uint8Array(buffer, bufferOffset, gridSize);
+        blockedCells.set(blockedCellsNumbers);
+        bufferOffset += gridSize;
+  // gScoreArray - cost of the cheapest path to reach the cell
+  const gScoreArray: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
+        gScoreArray.fill(0xFFFF);
+        bufferOffset += gridSize * 4;
+  // hScoreArray - heuristic value to reach the end cell
+  const hScoreArray: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
+        hScoreArray.fill(0xFFFF);
+        bufferOffset += gridSize * 4;
+  // fScoreArray - sum of gScore and hScore (heuristic value of the path)
+  const fScoreArray: Uint32Array = new Uint32Array(buffer, bufferOffset, gridSize);
 
-  // Initialize the gScore for the start node
-  gScoreArray[startNumber] = 0;
+  gScoreArray[start] = 0;
+  hScoreArray[start] = calculateHeuristic(start, end, w, diagonal);
+  fScoreArray[start] = gScoreArray[start] + hScoreArray[start];
 
-  while (openList.length) { // the destination node is not reached
-    let currentNode: Node = openList.shift() as Node;
+  queue[0] = start;
+  parents[start] = -1;
 
-    if (currentNode[0] === endNumber) {
-      return reconstructPath(parentArray, currentNode[0]);
+  const maxX: number = w - 1;
+  const maxY: number = h - 1;
+
+  let queueStart: number = 0;
+  let queueLength: number = 1;
+
+  while (queueLength > queueStart) {
+    // @ts-expect-error
+    const currentCell: number = queue[queueStart++];
+
+    if (currentCell === end) {
+      const path: number[] = [];
+      let current: number = end;
+      while (current !== -1) {
+        path.push(current);
+        if (current === start) break;
+        // @ts-expect-error
+        current = parents[current];
+      }
+      return path.reverse();
     }
-
-    openSet[currentNode[0]] = 0; // remove the current node from the openSet
-    closedSet[currentNode[0]] = 1; // put the current node in the closedSet
-
-    // get the neighbors of the current node
-    const neighbors: number[] = getNeighbors(currentNode[0], w, h, allowDiagonal);
-
+    const neighbors: number[] = getNeighbors(
+      currentCell,
+      parents,
+      blockedCells,
+      w,
+      maxX,
+      maxY,
+      diagonal
+    );
     for (const neighbor of neighbors) {
-      if (closedSet[neighbor] || blockedCells[neighbor] === 1) continue;
-
-      // The distance from start to a neighbor
-      const tentativeGScore: number = (gScoreArray[currentNode[0]] as number) + 1;
-
-      // if (neighbor has lower g value than current and is in the closed list) :
-      if (tentativeGScore < gScoreArray[neighbor]!) {
-        const hScore: number = calculateHeuristic(neighbor, endNumber, w, allowDiagonal);
-        const fScore: number = tentativeGScore + hScore;
-        const neighborNode: Node = [neighbor, hScore, fScore];
-
-        parentArray[neighbor] = currentNode[0];
-        gScoreArray[neighbor] = tentativeGScore;
-
-        // Add neighbor to the open list if it's not already there
-        if (openSet[neighbor] !== 1) {
-          insertNodeSorted(openList, neighborNode);
-          openSet[neighbor] = 1;
+      // @ts-expect-error
+      const tentativeGScore: number = gScoreArray[currentCell] + 1;
+      // @ts-expect-error
+      if (tentativeGScore >= gScoreArray[neighbor]) {
+        continue;
+      }
+      // @ts-expect-error
+      gScoreArray[neighbor] = gScoreArray[currentCell] + 1;
+      hScoreArray[neighbor] = calculateHeuristic(neighbor, end, w, diagonal);
+      fScoreArray[neighbor] = gScoreArray[neighbor] + hScoreArray[neighbor];
+      let low: number = queueStart;
+      let high: number = queueLength;
+      while (low < high) {
+        const mid: number = (low + high) >>> 1;
+        // @ts-expect-error
+        if (fScoreArray[queue[mid]] <= fScoreArray[neighbor]) {
+          low = mid + 1;
+        } else {
+          high = mid;
         }
       }
+      for (let i: number = queueLength; i > low; i--) {
+        // @ts-expect-error
+        queue[i] = queue[i - 1];
+      }
+      queue[low] = neighbor;
+      queueLength++;
     }
   }
 
-  // No path found
   return [];
 }
 
-// Function to insert node in sorted order by fScore using binary insertion
-function insertNodeSorted(openList: Node[], newNode: Node): void {
-  let low: number = 0;            // Start of the search space
-  let high: number = openList.length;  // End of the search space (the entire array)
+function calculateHeuristic(cellNumber: number, endNumber: number, w: number, diagonal: boolean): number {
+  const [x1, y1]: [number, number] = numberToPoint(cellNumber, w);
+  const [x2, y2]: [number, number] = numberToPoint(endNumber, w);
+  const dx: number = Math.abs(x1 - x2);
+  const dy: number = Math.abs(y1 - y2);
+  return diagonal ? Math.max(dx, dy) : dx + dy;
+}
 
-  // Binary search to find the insertion point
-  while (low < high) {
-    const mid = (low + high) >>> 1;  // Calculate the middle index
-    if (openList[mid]![2] < newNode[2]) {  // Compare f values (third element)
-      low = mid + 1;               // Move the low bound up if newNode has a larger f value
-    } else {
-      high = mid;                  // Move the high bound down if newNode has a smaller f value
+function getNeighbors(
+  currentCell: number,
+  parents: Uint32Array,
+  blockedCells: Uint8Array,
+  w: number,
+  maxX: number,
+  maxY: number,
+  diagonal: boolean
+): number[] {
+  const neighbors: number[] = [];
+
+  const px: number = currentCell % w;
+  const py: number = ~~(currentCell / w);
+
+  const left: number = currentCell - 1;
+  const right: number = currentCell + 1;
+  const top: number = currentCell - w;
+  const bottom: number = currentCell + w;
+
+  const canMoveLeft: boolean = px > 0;
+  const canMoveRight: boolean = px < maxX;
+  const canMoveUp: boolean = py > 0;
+  const canMoveDown: boolean = py < maxY;
+
+  if (
+    canMoveLeft &&
+    parents[left] === 0xFFFF &&
+    blockedCells[left] !== 1
+  ) { // left
+    neighbors.push(left);
+    parents[left] = currentCell;
+  }
+  if (
+    canMoveRight &&
+    parents[right] === 0xFFFF &&
+    blockedCells[right] !== 1
+  ) { // right
+    neighbors.push(right);
+    parents[right] = currentCell;
+  }
+  if (
+    canMoveUp &&
+    parents[top] === 0xFFFF &&
+    blockedCells[top] !== 1
+  ) { // up
+    neighbors.push(top);
+    parents[top] = currentCell;
+  }
+  if (
+    canMoveDown &&
+    parents[bottom] === 0xFFFF &&
+    blockedCells[bottom] !== 1
+  ) { // down
+    neighbors.push(bottom);
+    parents[bottom] = currentCell;
+  }
+
+  if (diagonal) {
+    let topLeft: number = currentCell - maxX;
+    let topRight: number = currentCell - w + 1;
+    let bottomLeft: number = currentCell + maxX;
+    let bottomRight: number = currentCell + w + 1;
+    if (
+      // @ts-expect-error
+      canMoveUp & canMoveLeft &&
+      parents[topLeft] === 0xFFFF &&
+      blockedCells[topLeft] !== 1 &&
+      blockedCells[top] !== 1 &&
+      blockedCells[left] !== 1
+    ) { // top-left
+      neighbors.push(topLeft);
+      parents[topLeft] = currentCell;
+    }
+    if (
+      // @ts-expect-error
+      canMoveUp & canMoveRight &&
+      parents[topRight] === 0xFFFF &&
+      blockedCells[topRight] !== 1 &&
+      blockedCells[top] !== 1 &&
+      blockedCells[right] !== 1
+    ) { // top-right
+      neighbors.push(topRight);
+      parents[topRight] = currentCell;
+    }
+    if (
+      // @ts-expect-error
+      canMoveDown & canMoveLeft &&
+      parents[bottomLeft] === 0xFFFF &&
+      blockedCells[bottomLeft] !== 1 &&
+      blockedCells[bottom] !== 1 &&
+      blockedCells[left] !== 1
+    ) { // bottom-left
+      neighbors.push(bottomLeft);
+      parents[bottomLeft] = currentCell;
+    }
+    if (
+      // @ts-expect-error
+      canMoveDown & canMoveRight &&
+      parents[bottomRight] === 0xFFFF &&
+      blockedCells[bottomRight] !== 1 &&
+      blockedCells[bottom] !== 1 &&
+      blockedCells[right] !== 1
+    ) { // bottom-right
+      neighbors.push(bottomRight);
+      parents[bottomRight] = currentCell;
     }
   }
 
-  // Insert the newNode at the found position
-  openList.splice(low, 0, newNode);
-}
-
-
-function getNeighbors(cellNumber: number, w: number, h: number, diagonal: boolean): number[] {
-  const neighbors: number[] = [];
-  const px: number = cellNumber % w;
-  const py: number = ~~(cellNumber / w);
-
-  // Cardinal directions
-  if (px > 0) neighbors.push(cellNumber - 1); // left
-  if (px < w - 1) neighbors.push(cellNumber + 1); // right
-  if (py > 0) neighbors.push(cellNumber - w); // up
-  if (py < h - 1) neighbors.push(cellNumber + w); // down
-
-
-  // Diagonals
-  if (diagonal) {
-    if (px > 0 && py > 0) neighbors.push(cellNumber - w - 1);
-    if (px < w - 1 && py > 0) neighbors.push(cellNumber - w + 1);
-    if (px > 0 && py < h - 1) neighbors.push(cellNumber + w - 1);
-    if (px < w - 1 && py < h - 1) neighbors.push(cellNumber + w + 1);
-  }
-
   return neighbors;
-}
-
-// @ts-ignore
-function calculateHeuristic(point1: number, point2: number, w: number, diagonal: boolean): number {
-  const [x1, y1]: Point = numberToPoint(point1, w);
-  const [x2, y2]: Point = numberToPoint(point2, w);
-  const dx: number = Math.abs(x1 - x2);
-  const dy: number = Math.abs(y1 - y2);
-  if (diagonal) {
-    return Math.max(dx, dy); // Chebyshev distance
-  } else {
-    return dx + dy; // Manhattan distance
-  }
-}
-
-function reconstructPath(
-  parentMap: Float64Array,
-  endNumber: number,
-): number[] {
-  const path: number[] = [];
-  let currentNumber: number|undefined = endNumber;
-
-  while (currentNumber !== undefined) {
-    path.push(currentNumber);
-    currentNumber = parentMap[currentNumber];
-  }
-
-  return path.reverse();
 }

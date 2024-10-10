@@ -7,7 +7,7 @@ export function breadthFirstSearch(
   diagonal: boolean = false
 ): number[] {
   const gridSize: number = w * h;
-  const bufferSize: number = gridSize * 4 * 2 + gridSize;
+  const bufferSize: number = (gridSize << 3) + gridSize;
   const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
   const queue: Uint32Array = new Uint32Array(buffer, 0, gridSize);
   const parents: Uint32Array = new Uint32Array(buffer, gridSize * 4, gridSize);
@@ -29,10 +29,11 @@ export function breadthFirstSearch(
     const currentCell: number = queue[queueStart++];
     if (currentCell === end) {
       const path: number[] = [];
-      let current: number | undefined = end;
+      let current: number = end;
       while (current && current !== -1) {
         path.push(current);
         if (current === start) break;
+        // @ts-expect-error
         current = parents[current];
       }
       return path.reverse();
