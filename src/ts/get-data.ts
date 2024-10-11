@@ -1,4 +1,4 @@
-import { Rectangle } from './geometry';
+import { Point, Rectangle } from './geometry';
 
 export function getData() {
   const canvasElement = document.getElementById('main-canvas') as HTMLCanvasElement;
@@ -11,9 +11,9 @@ export function getData() {
   const cellsY = 18;
   const cellWidth = ~~(w / cellsX);
   const cellHeight = ~~(h / cellsY);
-  let startPointCoords = [~~(8 * cellWidth + cellWidth * .5), ~~(8 * cellWidth) + cellHeight * .5];
+  let startPointCoords: Point = [~~(8 * cellWidth + cellWidth * .5), ~~(8 * cellWidth) + cellHeight * .5];
   let startPointNumber = startPointCoords[0] + startPointCoords[1] * w;
-  let endPointCoords = [~~(11 * cellHeight + cellWidth * .5), ~~(13 * cellHeight) + cellHeight * .5];
+  let endPointCoords: Point = [~~(11 * cellHeight + cellWidth * .5), ~~(13 * cellHeight) + cellHeight * .5];
   let endPointNumber = endPointCoords[0] + endPointCoords[1] * w;
   let squares: Rectangle[] = [];
   let blockedCellsUint8Array = new Uint8Array(w * h).fill(0);

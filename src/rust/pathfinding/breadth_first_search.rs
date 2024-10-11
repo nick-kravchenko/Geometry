@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
 pub fn breadth_first_search(
-  blocked_cells_numbers: Vec<u8>,
+  blocked_cells_numbers: &[u8],  // Take a slice instead of Vec<u8> to avoid unnecessary copying
   w: u32,
   h: u32,
   start: u32,
