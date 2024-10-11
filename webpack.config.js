@@ -20,28 +20,33 @@ module.exports = {
         use: "ts-loader",
         exclude: /node_modules/,
       },
-      {
-        test: /\.wasm$/,
-        type: "webassembly/experimental"
-      },
     ],
   },
   resolve: {
     extensions: [".tsx", ".ts", ".js", ".wasm"],
+    fallback: {
+      "buffer": require.resolve("buffer/"),
+      "process": require.resolve("process/browser"),
+    },
   },
   devServer: {
-    contentBase: dist,
+    static: dist,
     headers: {
       "Cross-Origin-Opener-Policy": "same-origin",
       "Cross-Origin-Embedder-Policy": "require-corp"
     }
   },
   plugins: [
-    new CopyPlugin([
-      path.resolve(__dirname, "static")
-    ]),
+    new CopyPlugin({
+      patterns: [
+        { from: path.resolve(__dirname, "static"), to: dist },
+      ],
+    }),
     new WasmPackPlugin({
       crateDirectory: __dirname,
     }),
-  ]
+  ],
+  experiments: {
+    asyncWebAssembly: true,
+  },
 };
