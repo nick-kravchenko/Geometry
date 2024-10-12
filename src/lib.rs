@@ -23,10 +23,9 @@ pub fn wasm_breadth_first_search(
     h: u32,
     start: u32,
     end: u32,
-    diagonal: bool,
 ) -> Vec<u32> {
     let memory: Uint8Array = Uint8Array::new(&memory);
     let blocked_cells_numbers: Vec<u8> = memory.to_vec();
-    let path: Vec<u32> = breadth_first_search(&blocked_cells_numbers, w, h, start, end, diagonal);
+    let path: Vec<u32> = breadth_first_search(&blocked_cells_numbers, w, h, start, end);
     path
 }

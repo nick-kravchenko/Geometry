@@ -28,7 +28,7 @@ function start(module: typeof import('pkg')) {
         sharedBlockedCellsArray.set(blockedCellsUint8Array);
 
   console.time('[WASM] BFS');
-  const pathBFSWASM = wasm_breadth_first_search(sharedBlockedCellsBuffer, w, h, startPointNumber, endPointNumber, false);
+  const pathBFSWASM = wasm_breadth_first_search(sharedBlockedCellsBuffer, w, h, startPointNumber, endPointNumber);
   console.timeEnd(`[WASM] BFS`);
   console.log(pathBFSWASM.length);
 

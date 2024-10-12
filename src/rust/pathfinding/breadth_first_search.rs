@@ -1,4 +1,3 @@
-use std::collections::VecDeque;
 use std::ptr;
 use chrono::prelude::*;
 use web_sys::console;
@@ -15,7 +14,6 @@ pub fn breadth_first_search(
   h: u32,
   start: u32,
   end: u32,
-  diagonal: bool,
 ) -> Vec<u32> {
   let grid_size = (w * h) as usize;
 
@@ -35,6 +33,9 @@ pub fn breadth_first_search(
 
   queue[0] = start;
 
+  let w_usize = w as usize;
+  let h_usize = h as usize;
+
   let max_x = w - 1;
   let max_y = h - 1;
 
@@ -42,6 +43,7 @@ pub fn breadth_first_search(
   let mut queue_length: usize = 1;
 
   let mut current_cell: u32;
+  let mut current_cell_index: usize;
 
   let mut px: u32;
   let mut py: u32;
@@ -58,6 +60,7 @@ pub fn breadth_first_search(
 
   while queue_index < queue_length {
     current_cell = queue[queue_index];
+    current_cell_index = current_cell as usize;
     queue_index += 1;
 
     if current_cell == end {
@@ -73,35 +76,43 @@ pub fn breadth_first_search(
     can_go_down = py < max_y;
 
     if can_go_left {
-      left_index = (current_cell - 1) as usize;
-      if blocked_cells_numbers[left_index] != 1 && parents[left_index] == u32::MAX {
-        queue[queue_length] = current_cell - 1;
-        queue_length += 1;
-        parents[left_index] = current_cell;
+      left_index = current_cell_index - 1;
+      if blocked_cells_numbers[left_index] != 1 {
+        if parents[left_index] == u32::MAX {
+          queue[queue_length] = current_cell - 1;
+          queue_length += 1;
+          parents[left_index] = current_cell;
+        }
       }
     }
     if can_go_right {
-      right_index = (current_cell + 1) as usize;
-      if blocked_cells_numbers[right_index] != 1 && parents[right_index] == u32::MAX {
-        queue[queue_length] = current_cell + 1;
-        queue_length += 1;
-        parents[right_index] = current_cell;
+      right_index = current_cell_index + 1;
+      if blocked_cells_numbers[right_index] != 1 {
+        if parents[right_index] == u32::MAX {
+          queue[queue_length] = current_cell + 1;
+          queue_length += 1;
+          parents[right_index] = current_cell;
+        }
       }
     }
     if can_go_up {
-      up_index = (current_cell - w) as usize;
-      if blocked_cells_numbers[up_index] != 1 && parents[up_index] == u32::MAX {
-        queue[queue_length] = current_cell - w;
-        queue_length += 1;
-        parents[up_index] = current_cell;
+      up_index = current_cell_index - w_usize;
+      if blocked_cells_numbers[up_index] != 1 {
+        if parents[up_index] == u32::MAX {
+          queue[queue_length] = current_cell - w;
+          queue_length += 1;
+          parents[up_index] = current_cell;
+        }
       }
     }
     if can_go_down {
-      down_index = (current_cell + w) as usize;
-      if blocked_cells_numbers[down_index] != 1 && parents[down_index] == u32::MAX {
-        queue[queue_length] = current_cell + w;
-        queue_length += 1;
-        parents[down_index] = current_cell;
+      down_index = current_cell_index + h_usize;
+      if blocked_cells_numbers[down_index] != 1 {
+        if parents[down_index] == u32::MAX {
+          queue[queue_length] = current_cell + w;
+          queue_length += 1;
+          parents[down_index] = current_cell;
+        }
       }
     }
   }
