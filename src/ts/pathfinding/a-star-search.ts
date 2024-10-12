@@ -1,6 +1,6 @@
 import { numberToPoint } from '../utils/number-to-point';
 
-export function aStar(
+export function AStarSearch(
   blockedCellsNumbers: Uint8Array,
   w: number,
   h: number,

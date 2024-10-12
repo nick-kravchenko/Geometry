@@ -1,5 +1,5 @@
 export function breadthFirstSearch(
-  blockedCellsNumbers: Uint8Array,
+  blockedCellsUint8Array: Uint8Array,
   w: number,
   h: number,
   start: number,
@@ -13,46 +13,65 @@ export function breadthFirstSearch(
   const parents: Uint32Array = new Uint32Array(buffer, gridSize * 4, gridSize);
         parents.fill(0xFFFFFFFF);
   const blockedCells: Uint8Array = new Uint8Array(buffer, gridSize * 8, gridSize);
-        blockedCells.set(blockedCellsNumbers);
+        blockedCells.set(blockedCellsUint8Array);
 
   queue[0] = start;
-  parents[start] = -1;
 
   const maxX: number = w - 1;
   const maxY: number = h - 1;
-  
+
   let queueLength: number = 1;
   let queueStart: number = 0;
 
+  let currentCell: number;
+
+  let px: number;
+  let py: number;
+
+  let left: number;
+  let right: number;
+  let top: number;
+  let bottom: number;
+
+  let topLeft: number;
+  let topRight: number;
+  let bottomLeft: number;
+  let bottomRight: number;
+
+  let canMoveLeft: boolean;
+  let canMoveRight: boolean;
+  let canMoveUp: boolean;
+  let canMoveDown: boolean;
+
   while (queueStart < queueLength) {
-    const currentCell: number = queue[queueStart++];
+    currentCell = queue[queueStart++];
     if (currentCell === end) {
       const path: number[] = [];
       let current: number = end;
-      while (current && current !== -1) {
+      while (current !== undefined) {
         path.push(current);
         if (current === start) break;
         current = parents[current];
       }
       return path.reverse();
     }
-    const px: number = currentCell % w;
-    const py: number = ~~(currentCell / w);
+    px = currentCell % w;
+    py = ~~(currentCell / w);
 
-    const left: number = currentCell - 1;
-    const right: number = currentCell + 1;
-    const top: number = currentCell - w;
-    const bottom: number = currentCell + w;
+    left = currentCell - 1;
+    right = currentCell + 1;
+    top = currentCell - w;
+    bottom = currentCell + w;
 
-    const canMoveLeft: boolean = px > 0;
-    const canMoveRight: boolean = px < maxX;
-    const canMoveUp: boolean = py > 0;
-    const canMoveDown: boolean = py < maxY;
+    canMoveLeft = px > 0;
+    canMoveRight = px < maxX;
+    canMoveUp = py > 0;
+    canMoveDown = py < maxY;
 
     if (
       canMoveLeft &&
       parents[left] === 0xFFFFFFFF &&
-      blockedCells[left] !== 1
+      blockedCells[left] ^ 0x1
     ) { // left
       queue[queueLength++] = left;
       parents[left] = currentCell;
@@ -60,7 +79,7 @@ export function breadthFirstSearch(
     if (
       canMoveRight &&
       parents[right] === 0xFFFFFFFF &&
-      blockedCells[right] !== 1
+      blockedCells[right] ^ 0x1
     ) { // right
       queue[queueLength++] = right;
       parents[right] = currentCell;
@@ -68,7 +87,7 @@ export function breadthFirstSearch(
     if (
       canMoveUp &&
       parents[top] === 0xFFFFFFFF &&
-      blockedCells[top] !== 1
+      blockedCells[top] ^ 0x1
     ) { // up
       queue[queueLength++] = top;
       parents[top] = currentCell;
@@ -76,17 +95,17 @@ export function breadthFirstSearch(
     if (
       canMoveDown &&
       parents[bottom] === 0xFFFFFFFF &&
-      blockedCells[bottom] !== 1
+      blockedCells[bottom] ^ 0x1
     ) { // down
       queue[queueLength++] = bottom;
       parents[bottom] = currentCell;
     }
 
     if (diagonal) {
-      let topLeft: number = currentCell - maxX;
-      let topRight: number = currentCell - w + 1;
-      let bottomLeft: number = currentCell + maxX;
-      let bottomRight: number = currentCell + w + 1;
+      topLeft = currentCell - maxX;
+      topRight = currentCell - w + 1;
+      bottomLeft = currentCell + maxX;
+      bottomRight = currentCell + w + 1;
       if (
         // @ts-expect-error
         canMoveUp & canMoveLeft &&
