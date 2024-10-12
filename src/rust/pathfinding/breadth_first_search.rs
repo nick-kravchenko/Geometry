@@ -12,14 +12,12 @@ pub fn breadth_first_search(
 ) -> Vec<u32> {
   let grid_size = (w * h) as usize;
 
-  log_formatted_timestamp_to_js();
   let mut queue: VecDeque<u32> = VecDeque::new();
   let mut parents: Vec<u32> = Vec::with_capacity(grid_size);
   unsafe {
     parents.set_len(grid_size);
     ptr::write_bytes(parents.as_mut_ptr(), u32::MAX as u8, grid_size);
   }
-  log_formatted_timestamp_to_js();
 
   queue.push_front(start);
 
@@ -104,7 +102,6 @@ pub fn breadth_first_search(
 
 #[inline]
 fn reconstruct_path(parents: &[u32], end: u32, start: u32) -> Vec<u32> {
-  log_formatted_timestamp_to_js();
   let mut path: Vec<u32> = Vec::new();
   let mut current = end;
 

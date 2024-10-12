@@ -52,16 +52,7 @@ export function AStarSearch(
   while (queueLength > queueStart) {
     const currentCell: number = queue[queueStart++];
 
-    if (currentCell === end) {
-      const path: number[] = [];
-      let current: number = end;
-      while (current !== -1) {
-        path.push(current);
-        if (current === start) break;
-        current = parents[current];
-      }
-      return path.reverse();
-    }
+    if (currentCell === end) break;
     const neighbors: number[] = getNeighbors(
       currentCell,
       parents,
@@ -97,7 +88,14 @@ export function AStarSearch(
     }
   }
 
-  return [];
+  const path: number[] = [];
+  let current: number = end;
+  while (current !== -1) {
+    path.push(current);
+    if (current === start) break;
+    current = parents[current];
+  }
+  return path.reverse();
 }
 
 function calculateHeuristic(cellNumber: number, endNumber: number, w: number, diagonal: boolean): number {
