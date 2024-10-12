@@ -14,6 +14,7 @@ export function breadthFirstSearch(
         parents.fill(0xFFFFFFFF);
   const blockedCells: Uint8Array = new Uint8Array(buffer, gridSize * 8, gridSize);
         blockedCells.set(blockedCellsUint8Array);
+  const path: number[] = [];
 
   queue[0] = start;
 
@@ -45,16 +46,9 @@ export function breadthFirstSearch(
 
   while (queueStart < queueLength) {
     currentCell = queue[queueStart++];
-    if (currentCell === end) {
-      const path: number[] = [];
-      let current: number = end;
-      while (current !== undefined) {
-        path.push(current);
-        if (current === start) break;
-        current = parents[current];
-      }
-      return path.reverse();
-    }
+
+    if (currentCell === end) break;
+
     px = currentCell % w;
     py = ~~(currentCell / w);
 
@@ -153,5 +147,11 @@ export function breadthFirstSearch(
     }
   }
 
-  return [];
+  let current: number = end;
+  while (current !== undefined) {
+    path.push(current);
+    if (current === start) break;
+    current = parents[current];
+  }
+  return path.reverse();
 }

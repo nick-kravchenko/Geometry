@@ -1,12 +1,7 @@
+use std::collections::VecDeque;
 use std::ptr;
 use chrono::prelude::*;
 use web_sys::console;
-
-pub fn log_formatted_timestamp_to_js() {
-  let now: DateTime<Utc> = Utc::now();
-  let formatted_time = format!("Current timestamp: {}", now);
-  console::log_1(&formatted_time.into()); // Log to JS console
-}
 
 pub fn breadth_first_search(
   blocked_cells_numbers: &[u8],  // Take a slice instead of Vec<u8> to avoid unnecessary copying
@@ -18,12 +13,7 @@ pub fn breadth_first_search(
   let grid_size = (w * h) as usize;
 
   log_formatted_timestamp_to_js();
-  let mut queue: Vec<u32> = Vec::with_capacity(grid_size);
-  unsafe {
-    queue.set_len(grid_size);
-    ptr::write_bytes(queue.as_mut_ptr(), 0, grid_size);
-  }
-
+  let mut queue: VecDeque<u32> = VecDeque::new();
   let mut parents: Vec<u32> = Vec::with_capacity(grid_size);
   unsafe {
     parents.set_len(grid_size);
@@ -31,16 +21,13 @@ pub fn breadth_first_search(
   }
   log_formatted_timestamp_to_js();
 
-  queue[0] = start;
+  queue.push_front(start);
 
   let w_usize = w as usize;
   let h_usize = h as usize;
 
   let max_x = w - 1;
   let max_y = h - 1;
-
-  let mut queue_index: usize = 0;
-  let mut queue_length: usize = 1;
 
   let mut current_cell: u32;
   let mut current_cell_index: usize;
@@ -58,13 +45,12 @@ pub fn breadth_first_search(
   let mut can_go_up: bool;
   let mut can_go_down: bool;
 
-  while queue_index < queue_length {
-    current_cell = queue[queue_index];
+  while !queue.is_empty() {
+    current_cell = queue.pop_front().unwrap();
     current_cell_index = current_cell as usize;
-    queue_index += 1;
 
     if current_cell == end {
-      return reconstruct_path(&parents, end, start);
+      break;
     }
 
     px = current_cell % w;
@@ -77,50 +63,45 @@ pub fn breadth_first_search(
 
     if can_go_left {
       left_index = current_cell_index - 1;
-      if blocked_cells_numbers[left_index] != 1 {
-        if parents[left_index] == u32::MAX {
-          queue[queue_length] = current_cell - 1;
-          queue_length += 1;
+      if blocked_cells_numbers[left_index] != 0x1 {
+        if parents[left_index] == 0xFFFFFFFF {
+          queue.push_back(current_cell - 1);
           parents[left_index] = current_cell;
         }
       }
     }
     if can_go_right {
       right_index = current_cell_index + 1;
-      if blocked_cells_numbers[right_index] != 1 {
-        if parents[right_index] == u32::MAX {
-          queue[queue_length] = current_cell + 1;
-          queue_length += 1;
+      if blocked_cells_numbers[right_index] != 0x1 {
+        if parents[right_index] == 0xFFFFFFFF {
+          queue.push_back(current_cell + 1);
           parents[right_index] = current_cell;
         }
       }
     }
     if can_go_up {
       up_index = current_cell_index - w_usize;
-      if blocked_cells_numbers[up_index] != 1 {
-        if parents[up_index] == u32::MAX {
-          queue[queue_length] = current_cell - w;
-          queue_length += 1;
+      if blocked_cells_numbers[up_index] != 0x1 {
+        if parents[up_index] == 0xFFFFFFFF {
+          queue.push_back(current_cell - w);
           parents[up_index] = current_cell;
         }
       }
     }
     if can_go_down {
       down_index = current_cell_index + h_usize;
-      if blocked_cells_numbers[down_index] != 1 {
-        if parents[down_index] == u32::MAX {
-          queue[queue_length] = current_cell + w;
-          queue_length += 1;
+      if blocked_cells_numbers[down_index] != 0x1 {
+        if parents[down_index] == 0xFFFFFFFF {
+          queue.push_back(current_cell + w);
           parents[down_index] = current_cell;
         }
       }
     }
   }
 
-  Vec::new()
+  reconstruct_path(&parents, end, start)
 }
 
-// Reconstruct the path using a parent array
 #[inline]
 fn reconstruct_path(parents: &[u32], end: u32, start: u32) -> Vec<u32> {
   log_formatted_timestamp_to_js();
@@ -137,4 +118,11 @@ fn reconstruct_path(parents: &[u32], end: u32, start: u32) -> Vec<u32> {
 
   path.reverse();
   path
+}
+
+#[inline]
+fn log_formatted_timestamp_to_js() {
+  let now: DateTime<Utc> = Utc::now();
+  let formatted_time = format!("Current timestamp: {}", now);
+  console::log_1(&formatted_time.into()); // Log to JS console
 }

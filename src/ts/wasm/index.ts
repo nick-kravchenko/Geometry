@@ -28,19 +28,19 @@ function start(module: typeof import('pkg')) {
         sharedBlockedCellsArray.set(blockedCellsUint8Array);
 
   console.time('[WASM] BFS');
+  console.log('-----------');
   const pathBFSWASM = wasm_breadth_first_search(sharedBlockedCellsBuffer, w, h, startPointNumber, endPointNumber);
+  console.log('-----------');
   console.timeEnd(`[WASM] BFS`);
   console.log(pathBFSWASM.length);
 
   console.time('[TS] BFS');
   const pathBFSTS: number[] = breadthFirstSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false);
   console.timeEnd(`[TS] BFS`);
-  console.log(pathBFSTS.length);
 
   console.time('[TS] A-Star search');
   const pathAStarTS: number[]|null = AStarSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false);
   console.timeEnd(`[TS] A-Star search`);
-  console.log(pathAStarTS.length);
 
   render(
     canvasElement,
