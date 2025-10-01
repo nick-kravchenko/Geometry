@@ -3,9 +3,9 @@ import { AStarSearch, breadthFirstSearch } from '../pathfinding';
 import { render } from './render';
 
 function start(module: typeof import('pkg')) {
-  const {
-    wasm_breadth_first_search,
-  } = module;
+  // const {
+  //   wasm_breadth_first_search,
+  // } = module;
   let {
     canvasElement,
     ctx,
@@ -27,9 +27,9 @@ function start(module: typeof import('pkg')) {
   const sharedBlockedCellsArray = new Uint8Array(sharedBlockedCellsBuffer);
         sharedBlockedCellsArray.set(blockedCellsUint8Array);
 
-  console.time('[WASM] BFS');
-  const pathBFSWASM = wasm_breadth_first_search(sharedBlockedCellsBuffer, w, h, startPointNumber, endPointNumber);
-  console.timeEnd(`[WASM] BFS`);
+  // console.time('[WASM] BFS');
+  // const pathBFSWASM = wasm_breadth_first_search(sharedBlockedCellsBuffer, w, h, startPointNumber, endPointNumber);
+  // console.timeEnd(`[WASM] BFS`);
 
   console.time('[TS] BFS');
   const pathBFSTS: number[] = breadthFirstSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false);

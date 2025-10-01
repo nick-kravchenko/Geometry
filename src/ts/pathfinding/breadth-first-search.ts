@@ -6,7 +6,7 @@ export function breadthFirstSearch(
   end: number,
   diagonal: boolean = false
 ): number[] {
-  const gridSize: number = w * h;
+  const gridSize: number = w * h >>> 0;
   const bufferSize: number = (gridSize << 3) + gridSize;
   const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
   const queue: Uint32Array = new Uint32Array(buffer, 0, gridSize);
@@ -18,31 +18,17 @@ export function breadthFirstSearch(
 
   queue[0] = start;
 
-  const maxX: number = w - 1;
-  const maxY: number = h - 1;
+  const X: number = w - 1, Y: number = h - 1;
 
-  let queueLength: number = 1;
-  let queueStart: number = 0;
+  let queueLength: number = 1, queueStart: number = 0;
 
-  let currentCell: number;
+  let currentCell: number = 0;
 
-  let px: number;
-  let py: number;
+  let px: number = 0, py: number = 0;
 
-  let left: number;
-  let right: number;
-  let top: number;
-  let bottom: number;
-
-  let topLeft: number;
-  let topRight: number;
-  let bottomLeft: number;
-  let bottomRight: number;
-
-  let canMoveLeft: boolean;
-  let canMoveRight: boolean;
-  let canMoveUp: boolean;
-  let canMoveDown: boolean;
+  let left: number, right: number, top: number, bottom: number;
+  let topLeft: number, topRight: number, bottomLeft: number, bottomRight: number;
+  let canMoveLeft: boolean, canMoveRight: boolean, canMoveUp: boolean, canMoveDown: boolean;
 
   while (queueStart < queueLength) {
     currentCell = queue[queueStart++];
@@ -58,9 +44,9 @@ export function breadthFirstSearch(
     bottom = currentCell + w;
 
     canMoveLeft = px > 0;
-    canMoveRight = px < maxX;
+    canMoveRight = px < X;
     canMoveUp = py > 0;
-    canMoveDown = py < maxY;
+    canMoveDown = py < Y;
 
     if (
       canMoveLeft &&
@@ -96,9 +82,9 @@ export function breadthFirstSearch(
     }
 
     if (diagonal) {
-      topLeft = currentCell - maxX;
+      topLeft = currentCell - X;
       topRight = currentCell - w + 1;
-      bottomLeft = currentCell + maxX;
+      bottomLeft = currentCell + X;
       bottomRight = currentCell + w + 1;
       if (
         // @ts-expect-error

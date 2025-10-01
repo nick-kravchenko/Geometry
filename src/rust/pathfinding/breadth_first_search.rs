@@ -17,81 +17,81 @@ pub fn breadth_first_search(
   unsafe {
     parents.set_len(grid_size);
     ptr::write_bytes(parents.as_mut_ptr(), u32::MAX as u8, grid_size);
-  }
 
-  queue.push_front(start);
+    queue.push_front(start);
 
-  let w_usize = w as usize;
-  let h_usize = h as usize;
+    let w_usize = w as usize;
+    let h_usize = h as usize;
 
-  let max_x = w - 1;
-  let max_y = h - 1;
+    let max_x = w - 1;
+    let max_y = h - 1;
 
-  let mut current_cell: u32;
-  let mut current_cell_index: usize;
+    let mut current_cell: u32;
+    let mut current_cell_index: usize;
 
-  let mut px: u32;
-  let mut py: u32;
+    let mut px: u32;
+    let mut py: u32;
 
-  let mut left_index: usize;
-  let mut right_index: usize;
-  let mut up_index: usize;
-  let mut down_index: usize;
+    let mut left_index: usize;
+    let mut right_index: usize;
+    let mut up_index: usize;
+    let mut down_index: usize;
 
-  let mut can_go_left: bool;
-  let mut can_go_right: bool;
-  let mut can_go_up: bool;
-  let mut can_go_down: bool;
+    let mut can_go_left: bool;
+    let mut can_go_right: bool;
+    let mut can_go_up: bool;
+    let mut can_go_down: bool;
 
-  while !queue.is_empty() {
-    current_cell = queue.pop_front().unwrap();
-    current_cell_index = current_cell as usize;
+    while !queue.is_empty() {
+      current_cell = queue.pop_front().unwrap();
+      current_cell_index = current_cell as usize;
 
-    if current_cell == end {
-      break;
-    }
+      if current_cell == end {
+        break;
+      }
 
-    px = current_cell % w;
-    py = current_cell / w;
+      px = current_cell % w;
+      py = current_cell / w;
 
-    can_go_left = px > 0;
-    can_go_right = px < max_x;
-    can_go_up = py > 0;
-    can_go_down = py < max_y;
+      can_go_left = px > 0;
+      can_go_right = px < max_x;
+      can_go_up = py > 0;
+      can_go_down = py < max_y;
 
-    if can_go_left {
-      left_index = current_cell_index - 1;
-      if blocked_cells_numbers[left_index] != 0x1 {
-        if parents[left_index] == 0xFFFFFFFF {
-          queue.push_back(current_cell - 1);
-          parents[left_index] = current_cell;
+      if can_go_left {
+        left_index = current_cell_index - 1;
+        if blocked_cells_numbers[left_index] != 0x1 {
+          if parents[left_index] == 0xFFFFFFFF {
+            queue.push_back(current_cell - 1);
+            parents[left_index] = current_cell;
+          }
         }
       }
-    }
-    if can_go_right {
-      right_index = current_cell_index + 1;
-      if blocked_cells_numbers[right_index] != 0x1 {
-        if parents[right_index] == 0xFFFFFFFF {
-          queue.push_back(current_cell + 1);
-          parents[right_index] = current_cell;
+      if can_go_right {
+        right_index = current_cell_index + 1;
+        if blocked_cells_numbers[right_index] != 0x1 {
+          if parents[right_index] == 0xFFFFFFFF {
+            queue.push_back(current_cell + 1);
+            parents[right_index] = current_cell;
+          }
         }
       }
-    }
-    if can_go_up {
-      up_index = current_cell_index - w_usize;
-      if blocked_cells_numbers[up_index] != 0x1 {
-        if parents[up_index] == 0xFFFFFFFF {
-          queue.push_back(current_cell - w);
-          parents[up_index] = current_cell;
+      if can_go_up {
+        up_index = current_cell_index - w_usize;
+        if blocked_cells_numbers[up_index] != 0x1 {
+          if parents[up_index] == 0xFFFFFFFF {
+            queue.push_back(current_cell - w);
+            parents[up_index] = current_cell;
+          }
         }
       }
-    }
-    if can_go_down {
-      down_index = current_cell_index + h_usize;
-      if blocked_cells_numbers[down_index] != 0x1 {
-        if parents[down_index] == 0xFFFFFFFF {
-          queue.push_back(current_cell + w);
-          parents[down_index] = current_cell;
+      if can_go_down {
+        down_index = current_cell_index + h_usize;
+        if blocked_cells_numbers[down_index] != 0x1 {
+          if parents[down_index] == 0xFFFFFFFF {
+            queue.push_back(current_cell + w);
+            parents[down_index] = current_cell;
+          }
         }
       }
     }
