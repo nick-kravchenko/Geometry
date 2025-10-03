@@ -4,140 +4,63 @@ export function breadthFirstSearch(
   h: number,
   start: number,
   end: number,
-  diagonal: boolean = false
 ): number[] {
-  const gridSize: number = w * h >>> 0;
-  const bufferSize: number = (gridSize << 3) + gridSize;
-  const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
-  const queue: Uint32Array = new Uint32Array(buffer, 0, gridSize);
-  const parents: Uint32Array = new Uint32Array(buffer, gridSize * 4, gridSize);
-        parents.fill(0xFFFFFFFF);
-  const blockedCells: Uint8Array = new Uint8Array(buffer, gridSize * 8, gridSize);
-        blockedCells.set(blockedCellsUint8Array);
-  const path: number[] = [];
+  const gs: number = w * h >>> 0;
+  const invW = 1 / w;
 
-  queue[0] = start;
+  if (gs === 0) return []; // empty grid
+  if (start < 0 || start >= gs) return []; // start cell is out of bounds
+  if (end < 0 || end >= gs) return []; // end cell is out of bounds
+  if (blockedCellsUint8Array[start] === 1 || blockedCellsUint8Array[end] === 1) return []; // start or end cell is blocked
+  if (start === end) return [start]; // start and end cells are the same
 
+  const bs: number = (gs << 3) + gs;
+  const bfr: ArrayBuffer = new ArrayBuffer(bs);
+  const q: Uint32Array = new Uint32Array(bfr, 0, gs);
+  const p: Int32Array = new Int32Array(bfr, gs * 4, gs);
+        p.fill(-1);
+  const bc: Uint8Array = new Uint8Array(bfr, gs * 8, gs);
+        bc.set(blockedCellsUint8Array);// blocked - 1, free - 0, visited - 7
   const X: number = w - 1, Y: number = h - 1;
+  let ql: number = 1, qs: number = 0;
+  q[0] = start;
+  bc[start] |= 0x80;
 
-  let queueLength: number = 1, queueStart: number = 0;
+  while (qs < ql) {
+    const c: number = q[qs++]; // getting next cell from the queue
 
-  let currentCell: number = 0;
+    if (c === end) break; // path found
 
-  let px: number = 0, py: number = 0;
+    const cy: number = (c * invW) | 0;
+    const cx: number = c - cy * w;
 
-  let left: number, right: number, top: number, bottom: number;
-  let topLeft: number, topRight: number, bottomLeft: number, bottomRight: number;
-  let canMoveLeft: boolean, canMoveRight: boolean, canMoveUp: boolean, canMoveDown: boolean;
-
-  while (queueStart < queueLength) {
-    currentCell = queue[queueStart++];
-
-    if (currentCell === end) break;
-
-    px = currentCell % w;
-    py = ~~(currentCell / w);
-
-    left = currentCell - 1;
-    right = currentCell + 1;
-    top = currentCell - w;
-    bottom = currentCell + w;
-
-    canMoveLeft = px > 0;
-    canMoveRight = px < X;
-    canMoveUp = py > 0;
-    canMoveDown = py < Y;
-
-    if (
-      canMoveLeft &&
-      parents[left] === 0xFFFFFFFF &&
-      blockedCells[left] ^ 0x1
-    ) { // left
-      queue[queueLength++] = left;
-      parents[left] = currentCell;
+    if (cx < X) {
+      const r: number = c + 1; const mr: number = bc[r];
+      if ((mr & 0x81) === 0) { bc[r] = mr | 0x80; p[r] = c; q[ql++] = r; }
     }
-    if (
-      canMoveRight &&
-      parents[right] === 0xFFFFFFFF &&
-      blockedCells[right] ^ 0x1
-    ) { // right
-      queue[queueLength++] = right;
-      parents[right] = currentCell;
+    if (cy < Y) {
+      const b: number = c + w; const mb: number = bc[b];
+      if ((mb & 0x81) === 0) { bc[b] = mb | 0x80; p[b] = c; q[ql++] = b; }
     }
-    if (
-      canMoveUp &&
-      parents[top] === 0xFFFFFFFF &&
-      blockedCells[top] ^ 0x1
-    ) { // up
-      queue[queueLength++] = top;
-      parents[top] = currentCell;
+    if (cx > 0) {
+      const l: number = c - 1; const ml: number = bc[l];
+      if ((ml & 0x81) === 0) { bc[l] = ml | 0x80; p[l] = c; q[ql++] = l; }
     }
-    if (
-      canMoveDown &&
-      parents[bottom] === 0xFFFFFFFF &&
-      blockedCells[bottom] ^ 0x1
-    ) { // down
-      queue[queueLength++] = bottom;
-      parents[bottom] = currentCell;
-    }
-
-    if (diagonal) {
-      topLeft = currentCell - X;
-      topRight = currentCell - w + 1;
-      bottomLeft = currentCell + X;
-      bottomRight = currentCell + w + 1;
-      if (
-        // @ts-expect-error
-        canMoveUp & canMoveLeft &&
-        parents[topLeft] === 0xFFFFFFFF &&
-        blockedCells[topLeft] !== 1 &&
-        blockedCells[top] !== 1 &&
-        blockedCells[left] !== 1
-      ) { // top-left
-        queue[queueLength++] = topLeft;
-        parents[topLeft] = currentCell;
-      }
-      if (
-        // @ts-expect-error
-        canMoveUp & canMoveRight &&
-        parents[topRight] === 0xFFFFFFFF &&
-        blockedCells[topRight] !== 1 &&
-        blockedCells[top] !== 1 &&
-        blockedCells[right] !== 1
-      ) { // top-right
-        queue[queueLength++] = topRight;
-        parents[topRight] = currentCell;
-      }
-      if (
-        // @ts-expect-error
-        canMoveDown & canMoveLeft &&
-        parents[bottomLeft] === 0xFFFFFFFF &&
-        blockedCells[bottomLeft] !== 1 &&
-        blockedCells[bottom] !== 1 &&
-        blockedCells[left] !== 1
-      ) { // bottom-left
-        queue[queueLength++] = bottomLeft;
-        parents[bottomLeft] = currentCell;
-      }
-      if (
-        // @ts-expect-error
-        canMoveDown & canMoveRight &&
-        parents[bottomRight] === 0xFFFFFFFF &&
-        blockedCells[bottomRight] !== 1 &&
-        blockedCells[bottom] !== 1 &&
-        blockedCells[right] !== 1
-      ) { // bottom-right
-        queue[queueLength++] = bottomRight;
-        parents[bottomRight] = currentCell;
-      }
+    if (cy > 0) {
+      const t: number = c - w; const mt: number = bc[t];
+      if ((mt & 0x81) === 0) { bc[t] = mt | 0x80; p[t] = c; q[ql++] = t; }
     }
   }
 
-  let current: number = end;
-  while (current !== undefined) {
-    path.push(current);
-    if (current === start) break;
-    current = parents[current];
+  if (p[end] === -1 && start !== end) return [];
+
+  const path: number[] = [];
+  let i: number = end;
+  while (i !== undefined) {
+    path.push(i);
+    if (i === start) break;
+    i = p[i];
   }
+
   return path.reverse();
 }

@@ -16,7 +16,7 @@ export function getData() {
   let endPointCoords: Point = [~~(11 * cellHeight + cellWidth * .5), ~~(13 * cellHeight) + cellHeight * .5];
   let endPointNumber = endPointCoords[0] + endPointCoords[1] * w;
   let squares: Rectangle[] = [];
-  let blockedCellsUint8Array = new Uint8Array(w * h).fill(0x0);
+  let blockedCellsUint8Array = new Uint8Array(w * h).fill(0b0);
   const field: {
     cellsNumbers: number[],
     cellsCoords: number[][],
@@ -77,11 +77,11 @@ export function getData() {
   const offset = 0;
   for (const square of squares) {
     const [squareX, squareY]: [number, number] = square[0];
-    for (let x = squareX - offset; x < squareX + square[1] + offset; x++) {
-      for (let y = squareY - offset; y < squareY + square[2] + offset; y++) {
+    for (let x = squareX - offset - ~~(cellWidth * .25); x < squareX + square[1] + offset + ~~(cellWidth * .25); x++) {
+      for (let y = squareY - offset - ~~(cellWidth * .25); y < squareY + square[2] + offset + ~~(cellWidth * .25); y++) {
         const index = x + y * w;
         field.blockedCellsNumbers.push(index);
-        blockedCellsUint8Array[index] = 0x1;
+        blockedCellsUint8Array[index] = 0b1;
       }
     }
   }
