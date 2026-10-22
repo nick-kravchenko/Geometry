@@ -4,3 +4,7 @@
 /target
 /pkg
 /wasm-pack.log
+
+# AI tooling
+/.claude
+/.mcp.json
