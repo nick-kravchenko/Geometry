@@ -3,10 +3,6 @@ use web_sys::js_sys::Uint8Array;
 mod rust;
 use crate::rust::pathfinding::breadth_first_search::breadth_first_search;
 
-#[cfg(feature = "wee_alloc")]
-#[global_allocator]
-static ALLOC: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
-
 
 #[wasm_bindgen(start)]
 pub fn main_js() -> Result<(), JsValue> {

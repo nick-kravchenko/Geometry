@@ -3,24 +3,24 @@
   "name": "geometry",
   "version": "0.1.0",
   "scripts": {
-    "build": "rimraf dist pkg && webpack",
-    "start": "rimraf dist pkg && webpack-dev-server",
-    "test": "cargo test && wasm-pack test --headless"
+    "wasm": "wasm-pack build --target bundler",
+    "wasm:dev": "wasm-pack build --dev --target bundler",
+    "build": "rimraf dist pkg && npm run wasm && webpack --mode production",
+    "build:dev": "rimraf dist pkg && npm run wasm:dev && webpack --mode development",
+    "start": "rimraf dist pkg && npm run wasm:dev && run-p serve watch:wasm",
+    "test": "cargo test && wasm-pack test --headless",
+    "serve": "webpack serve --mode development",
+    "watch:wasm": "node scripts/watch-wasm.mjs"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
-    "@wasm-tool/wasm-pack-plugin": "^1.7.0",
     "copy-webpack-plugin": "^14.0.0",
-    "pkg": "file:./pkg",
+    "npm-run-all2": "^9.0.4",
     "rimraf": "^6.1.3",
     "ts-loader": "^9.6.2",
     "typescript": "~6.0.3",
     "webpack": "^5.112.0",
     "webpack-cli": "^7.2.3",
     "webpack-dev-server": "^6.1.0"
-  },
-  "dependencies": {
-    "buffer": "^6.0.3",
-    "process": "^0.11.10"
   }
 }
