@@ -61,6 +61,16 @@ interface SearchResult {
 
 type Search = (end: number, diagonal: boolean) => SearchResult;
 
+// one algorithm on one map in one mode, from the ?benchmark mode
+interface BenchmarkRow {
+  map: string,
+  diagonal: boolean,
+  algorithm: string,
+  medianMs: number,
+  minMs: number,
+  pathLength: number, // in pixels, 0 when no path was found
+}
+
 function start(module: typeof import('pkg')): void {
   const {
     Pathfinder,
@@ -218,7 +228,63 @@ function start(module: typeof import('pkg')): void {
     updateFps(now);
     requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
+
+  // ?benchmark (or ?benchmark=N for N runs, 20 by default) times every algorithm that can run, on every
+  // map at its default layout and end point, in both modes, before the demo starts. The results go to
+  // the console as a table and to window.benchmarkResults, for scripts to read.
+  const pathLength = ({ cells, points }: SearchResult): number => {
+    const path: Point[] = points ?? Array.from(cells ?? [], (cell: number): Point => [cell % w, ~~(cell / w)]);
+    let total: number = 0;
+    for (let i: number = 1; i < path.length; i++) total += Math.hypot(path[i][0] - path[i - 1][0], path[i][1] - path[i - 1][1]);
+    return total;
+  };
+  async function benchmark(runs: number): Promise<BenchmarkRow[]> {
+    const rows: BenchmarkRow[] = [];
+    const shownMap: number = mapIndex;
+    for (mapIndex = 0; mapIndex < MAPS.length; mapIndex++) {
+      seed = DEFAULT_SEED;
+      loadMap();
+      for (const mode of [false, true]) {
+        for (const [label, , , run, availability = always] of algorithms) {
+          if (availability(mode, isCircleMap()) !== null) continue;
+          ctx?.clearRect(0, 0, w, h);
+          ctx?.fillText(`Benchmarking ${MAPS[mapIndex].name}, ${mode ? 'diagonal' : '4 directions'}: ${label}`, 20, 40);
+          await new Promise((resolve: (value: unknown) => void) => setTimeout(resolve)); // let the page draw
+          let result: SearchResult = run(end, mode); // warm up
+          const times: number[] = [];
+          for (let i: number = 0; i < runs; i++) {
+            const startTime: number = performance.now();
+            result = run(end, mode);
+            times.push(performance.now() - startTime);
+          }
+          times.sort((a: number, b: number) => a - b);
+          rows.push({
+            map: MAPS[mapIndex].name,
+            diagonal: mode,
+            algorithm: label,
+            medianMs: +times[runs >> 1].toFixed(3),
+            minMs: +times[0].toFixed(3),
+            pathLength: +pathLength(result).toFixed(1),
+          });
+        }
+      }
+    }
+    mapIndex = shownMap;
+    seed = DEFAULT_SEED;
+    loadMap();
+    return rows;
+  }
+  const benchmarkRuns: string | null = new URLSearchParams(location.search).get('benchmark');
+  if (benchmarkRuns === null) {
+    requestAnimationFrame(frame);
+  } else {
+    ctx.font = `${fontSize}px sans-serif`;
+    benchmark(Math.max(1, parseInt(benchmarkRuns, 10) || 20)).then((rows: BenchmarkRow[]) => {
+      console.table(rows);
+      (window as unknown as { benchmarkResults: BenchmarkRow[] }).benchmarkResults = rows;
+      requestAnimationFrame(frame);
+    });
+  }
 
   const toggleDiagonal = (): void => {
     diagonal = !diagonal;

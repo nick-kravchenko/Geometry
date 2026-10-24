@@ -28,6 +28,8 @@ Shown and hidden algorithms, the map, and the Diagonal, Graph overlay and Hide U
 
 Timings come from `performance.now`, which browsers coarsen on pages that are not cross-origin isolated, such as GitHub Pages, so individual measurements there are whole milliseconds; the smoothing evens this out.
 
+Opening the demo with `?benchmark` (or `?benchmark=N` for N runs, 20 by default) times every algorithm that can run on every map, at its default layout and end point, in both movement modes, before the demo starts. Results go to the console as a table (median and fastest time, path length) and to `window.benchmarkResults`. Benchmark a production build (`npm run build`): `npm start` builds WASM unoptimized.
+
 ## Stack
 
 | Layer | Tech |
@@ -189,7 +191,7 @@ Shortest path at any angle around circles, which may overlap, working on the cir
 circleVisibilityGraphSearch(circles, start, end, maxStep?): Point[]
 ```
 
-On the demo's circle maps it takes about 1 ms (Asteroids, 26 circles) and 11 ms (Pillars, 75 circles) in TS, 0.4 ms and 3.7 ms in WASM, against 375 ms and 1 s for the pixel visibility graph on the same obstacles rasterized.
+On the demo's circle maps (`?benchmark`, median) it takes about 2 ms (Asteroids, 26 circles), 13 ms (Pillars, 75 circles) and 3 ms (Blobs, 41 overlapping circles) in TS, 1 ms, 9 ms and 1.7 ms in WASM, against hundreds of milliseconds for the pixel visibility graph on the same obstacles rasterized.
 
 ### WASM — Rust (`Pathfinder`)
 

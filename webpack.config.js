@@ -23,7 +23,8 @@ module.exports = {
   resolve: {
     extensions: [".tsx", ".ts", ".js", ".wasm"],
     alias: {
-      pkg: path.resolve(__dirname, "pkg"),
+      // WASM_PKG points at another wasm-pack output, so a benchmark build leaves pkg/ alone
+      pkg: process.env.WASM_PKG ? path.resolve(process.env.WASM_PKG) : path.resolve(__dirname, "pkg"),
     },
   },
   devServer: {
@@ -32,7 +33,7 @@ module.exports = {
   plugins: [
     new CopyPlugin({
       patterns: [
-        { from: path.resolve(__dirname, "static"), to: dist },
+        { from: path.resolve(__dirname, "static") }, // into the output path
       ],
     }),
   ],
