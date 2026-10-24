@@ -37,6 +37,7 @@ export const COLORS = {
   aStar: PALETTE.gamboge,
   jumpPoint: PALETTE.rust,
   visibilityGraph: PALETTE.vanilla,
+  navigation: PALETTE.auburn,
   // the overlay shows the visibility graph's own graph, so it shares that algorithm's color
   graphEdge: withAlpha(PALETTE.vanilla, .4),
   graphCorner: PALETTE.vanilla,

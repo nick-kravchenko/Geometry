@@ -205,3 +205,39 @@ fn pathfinder_circle_visibility_graph_stays_out_of_circles() {
         }
     }
 }
+
+#[test]
+fn pathfinder_navigation_graph_finds_paths_close_to_the_exact_visibility_graph() {
+    let mut random = Random(0x2545F491);
+    let size = 100usize;
+    let mut pathfinder = Pathfinder::new(size as u32, size as u32);
+    for _ in 0..20 {
+        // rectangles kept 6 pixels apart and from the edge, so no passage is too narrow for the graph
+        let mut grid = vec![0u8; size * size];
+        let mut taken = vec![false; size * size];
+        for _ in 0..60 {
+            let (x0, y0) = (6 + (random.next() * 80.0) as usize, 6 + (random.next() * 80.0) as usize);
+            let (x1, y1) = ((x0 + 3 + (random.next() * 20.0) as usize).min(size - 7), (y0 + 3 + (random.next() * 20.0) as usize).min(size - 7));
+            if (y0..y1).any(|y| (x0..x1).any(|x| taken[y * size + x])) { continue; }
+            for y in y0.saturating_sub(6)..(y1 + 6).min(size) { for x in x0.saturating_sub(6)..(x1 + 6).min(size) { taken[y * size + x] = true; } }
+            for y in y0..y1 { for x in x0..x1 { grid[y * size + x] = 1; } }
+        }
+        pathfinder.set_cells(&grid);
+        pathfinder.build_navigation_graph(1.5);
+        for _ in 0..10 {
+            let (from, to) = ((random.next() * (size * size) as f64) as u32, (random.next() * (size * size) as f64) as u32);
+            if grid[from as usize] == 1 || grid[to as usize] == 1 { continue; }
+            let center = |cell: u32| ((cell as usize % size) as f64 + 0.5, (cell as usize / size) as f64 + 0.5);
+            let ((sx, sy), (ex, ey)) = (center(from), center(to));
+            let path = pathfinder.navigation_graph_search(sx, sy, ex, ey);
+            let reachable = !pathfinder.breadth_first_search(from, to, false).is_empty();
+            assert_eq!(!path.is_empty(), reachable);
+            if !reachable { continue; }
+            let length = |path: &[f64]| -> f64 { path.chunks(2).zip(path.chunks(2).skip(1)).map(|(a, b)| (b[0] - a[0]).hypot(b[1] - a[1])).sum() };
+            let exact = length(&pathfinder.visibility_graph_search(from, to));
+            let bends = (path.len() / 2 - 2) as f64;
+            // nodes sit just off the corners, so each bend may cost a few pixels
+            assert!(length(&path) <= exact + 3.0 * bends + 1.0, "{} > {exact}", length(&path));
+        }
+    }
+}

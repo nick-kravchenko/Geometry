@@ -4,6 +4,7 @@ use crate::rust::pathfinding::a_star_search::AStarSearch;
 use crate::rust::pathfinding::breadth_first_search::{breadth_first_search, BreadthFirstSearch};
 use crate::rust::pathfinding::circle_visibility_graph_search::{Circle, CircleVisibilityGraphSearch};
 use crate::rust::pathfinding::jump_point_search::JumpPointSearch;
+use crate::rust::pathfinding::navigation_graph::NavigationGraph;
 use crate::rust::pathfinding::visibility_graph_search::VisibilityGraphSearch;
 
 
@@ -47,6 +48,7 @@ pub struct Pathfinder {
     jump_point: Option<JumpPointSearch>,
     visibility_graph: Option<VisibilityGraphSearch>,
     circle_visibility_graph: CircleVisibilityGraphSearch,
+    navigation_graph: Option<NavigationGraph>,
 }
 
 #[wasm_bindgen]
@@ -54,7 +56,7 @@ impl Pathfinder {
     #[wasm_bindgen(constructor)]
     pub fn new(w: u32, h: u32) -> Pathfinder {
         let (w, h) = (w as usize, h as usize);
-        Pathfinder { cells: vec![0; w * h], w, h, breadth_first: None, a_star: None, jump_point: None, visibility_graph: None, circle_visibility_graph: CircleVisibilityGraphSearch::new() }
+        Pathfinder { cells: vec![0; w * h], w, h, breadth_first: None, a_star: None, jump_point: None, visibility_graph: None, circle_visibility_graph: CircleVisibilityGraphSearch::new(), navigation_graph: None }
     }
 
     pub fn cells_ptr(&self) -> *const u8 {
@@ -102,5 +104,24 @@ impl Pathfinder {
     ) -> Vec<f64> {
         let circles: Vec<Circle> = circles.chunks_exact(3).map(|c| (c[0], c[1], c[2])).collect();
         self.circle_visibility_graph.search(&circles, (start_x, start_y), (end_x, end_y), max_step)
+    }
+
+    // Builds the navigation graph from the grid as it is now; rebuild after obstacles change. Paths may
+    // cut into obstacles by up to tolerance pixels: keep it within their padding. Returns the node count.
+    pub fn build_navigation_graph(&mut self, tolerance: f64) -> u32 {
+        let graph = NavigationGraph::build(&self.cells, self.w, self.h, tolerance);
+        let nodes = graph.node_count() as u32;
+        self.navigation_graph = Some(graph);
+        nodes
+    }
+
+    // Shortest path at any angle on the navigation graph, between points in pixel coordinates, as
+    // [x0, y0, x1, y1, ...]; empty without a path or before build_navigation_graph. See NavigationGraph.
+    pub fn navigation_graph_search(&mut self, start_x: f64, start_y: f64, end_x: f64, end_y: f64) -> Vec<f64> {
+        let (cells, w, h) = (&self.cells, self.w, self.h);
+        match &mut self.navigation_graph {
+            Some(graph) => graph.search(cells, w, h, (start_x, start_y), (end_x, end_y)),
+            None => Vec::new(),
+        }
     }
 }

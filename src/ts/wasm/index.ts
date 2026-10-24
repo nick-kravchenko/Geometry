@@ -5,8 +5,11 @@ import {
   breadthFirstSearch,
   breadthFirstSearchDiagonal,
   buildCircleGraph,
+  buildNavigationGraph,
   circleVisibilityGraphSearch,
   jumpPointSearch,
+  NavigationGraph,
+  navigationGraphSearch,
   obstacleOutlines,
   visibilityGraph,
   visibilityGraphSearch,
@@ -98,8 +101,12 @@ function start(module: typeof import('pkg')): void {
   let from: number;
   let end: number;
   let endCoordinates: Point;
-  // obstacles only change with the map, so their outlines are traced once per map, on first use
+  // obstacles only change with the map, so their outlines and the navigation graph are built once per
+  // map, on first use
   let outlines: [Point, Point][] | null;
+  let navigation: NavigationGraph | null;
+  let wasmNavigation: boolean; // whether WASM has built its navigation graph for this map
+  let navigationOverlay: GraphOverlay | null;
   const loadMap = (): void => {
     const map: MapDefinition = MAPS[mapIndex];
     field = map.field ? map.field() : buildField((map.generate as (seed: number) => CellMap)(seed), canvasW, canvasH);
@@ -115,6 +122,9 @@ function start(module: typeof import('pkg')): void {
     end = field.endPointNumber;
     endCoordinates = field.endPointCoordinates;
     outlines = null;
+    navigation = null;
+    wasmNavigation = false;
+    navigationOverlay = null;
     // the WASM searches read the grid in place: write it straight into WASM memory, as a game would every frame
     new Uint8Array(wasm_memory().buffer, wasm().cells_ptr(), w * h).set(grid);
   };
@@ -149,9 +159,16 @@ function start(module: typeof import('pkg')): void {
     !diagonal ? 'diagonal only' : !circleMap ? 'circle maps only' : null
   );
   const always: Availability = (): null => null;
+  const diagonalOnly: Availability = (diagonal: boolean): string | null => (!diagonal ? 'diagonal only' : null);
+  // the outlines may cut into obstacles by the tolerance, so it stays within the padding
+  const tolerance = (): number => Math.min(1.5, Math.max(1, field.padding));
+  const navigationGraph = (): NavigationGraph => navigation ??= buildNavigationGraph(grid, w, h, tolerance());
+  const pixelCenter = ([x, y]: Point): Point => [x + .5, y + .5];
 
-  // label, color, path width, search, and when the algorithm can run
-  const algorithms: [string, string, number, Search, Availability?][] = [
+  // label, color, path width, search, when the algorithm can run, and whether it is fast enough to
+  // search every frame on city maps
+  type Algorithm = [string, string, number, Search, Availability?, boolean?];
+  const algorithms: Algorithm[] = [
     ['[WASM] BFS', wasmPathColor(COLORS.breadthFirst), 6, (end: number, diagonal: boolean): SearchResult => ({
       cells: wasm().breadth_first_search(from, end, diagonal),
     })],
@@ -185,13 +202,22 @@ function start(module: typeof import('pkg')): void {
     ['[TS] Circle visibility graph', COLORS.visibilityGraph, 2, (): SearchResult => ({
       points: circleVisibilityGraphSearch(paddedCircles(), field.startPointCoordinates, endCoordinates),
     }), circleVisibilityGraph],
+    ['[WASM] Navigation graph', wasmPathColor(COLORS.navigation), 6, (): SearchResult => {
+      if (!wasmNavigation) wasm().build_navigation_graph(tolerance());
+      wasmNavigation = true;
+      const [startX, startY] = pixelCenter(field.startPointCoordinates), [endX, endY] = pixelCenter(endCoordinates);
+      return { points: toPoints(wasm().navigation_graph_search(startX, startY, endX, endY)) };
+    }, diagonalOnly, true],
+    ['[TS] Navigation graph', COLORS.navigation, 2, (): SearchResult => ({
+      points: navigationGraphSearch(navigationGraph(), grid, w, h, pixelCenter(field.startPointCoordinates), pixelCenter(endCoordinates)),
+    }), diagonalOnly, true],
   ];
   const layers: PathLayer[] = algorithms.map(([label, color, size]): PathLayer => ({
     label, color, size, time: NaN, visible: !settings.hidden.includes(label), enabled: true,
   }));
   // marks which algorithms can run in the current mode and on the current map
   const updateAvailability = (): void => {
-    algorithms.forEach(([, , , , availability = always]: [string, string, number, Search, Availability?], i: number) => {
+    algorithms.forEach(([, , , , availability = always]: Algorithm, i: number) => {
       const reason: string | null = availability(diagonal, isCircleMap(), isCityMap());
       layers[i].enabled = reason === null;
       layers[i].disabledReason = reason ?? undefined;
@@ -209,9 +235,24 @@ function start(module: typeof import('pkg')): void {
   let overlay: boolean = settings.overlay;
   let uiHidden: boolean = settings.uiHidden;
   updateAvailability();
-  // the overlay shows the graph the visibility graph searches, so only while that algorithm runs
+  // the overlay shows the graph the visibility graph searches, so only while that algorithm runs; on city
+  // maps, where it does not, the navigation graph: simplified outlines, nodes and edges
   const graphOverlay = (): GraphOverlay | null => {
-    if (!overlay || !diagonal || isCityMap()) return null;
+    if (!overlay || !diagonal) return null;
+    if (isCityMap()) {
+      if (navigationOverlay) return navigationOverlay;
+      const { x, y, offsets, targets, outlines: loops } = navigationGraph();
+      const edges: [Point, Point][] = [];
+      for (let a: number = 0; a < x.length; a++) {
+        for (let k: number = offsets[a]; k < offsets[a + 1]; k++) if (targets[k] > a) edges.push([[x[a], y[a]], [x[targets[k]], y[targets[k]]]]);
+      }
+      navigationOverlay = {
+        outlines: loops.flatMap((loop: Point[]) => loop.map((point: Point, i: number): [Point, Point] => [point, loop[(i + 1) % loop.length]])),
+        corners: Array.from(x, (nodeX: number, i: number): Point => [nodeX, y[i]]),
+        edges,
+      };
+      return navigationOverlay;
+    }
     if (isCircleMap()) { // the circle visibility graph: padded circles, tangent points and segments
       const circles: Circle[] = paddedCircles();
       const graph = buildCircleGraph(circles, field.startPointCoordinates, endCoordinates);
@@ -225,16 +266,16 @@ function start(module: typeof import('pkg')): void {
 
   // Every frame searches again with every visible algorithm, as a game would while things move;
   // hidden algorithms are skipped, so hiding the slow ones raises the frame rate. City maps have 16
-  // times the pixels, where grid searches take far longer than a frame: they search only when the end
-  // point, the mode, the map or the shown algorithms change.
+  // times the pixels, where grid searches take far longer than a frame: except for the navigation graph,
+  // they search only when the end point, the mode, the map or the shown algorithms change.
   let searched: string = '';
   function search(): void {
     const state: string = [mapIndex, seed, end, diagonal, ...layers.map(({ visible }: PathLayer) => visible)].join();
-    if (isCityMap() && state === searched) return;
+    const unchanged: boolean = isCityMap() && state === searched;
     searched = state;
-    algorithms.forEach(([, , , run]: [string, string, number, Search, Availability?], i: number) => {
+    algorithms.forEach(([, , , run, , realTime]: Algorithm, i: number) => {
       const layer: PathLayer = layers[i];
-      if (!layer.visible || !layer.enabled) return;
+      if (!layer.visible || !layer.enabled || (unchanged && !realTime)) return;
       const startTime: number = performance.now();
       const result: SearchResult = run(end, diagonal);
       const time: number = performance.now() - startTime;
@@ -257,7 +298,7 @@ function start(module: typeof import('pkg')): void {
 
   function frame(now: number): void {
     search();
-    const controls = { fps, diagonal, overlay, overlayAvailable: diagonal && !isCityMap(), map: MAPS[mapIndex].name, procedural: MAPS[mapIndex].procedural, uiHidden };
+    const controls = { fps, diagonal, overlay, overlayAvailable: diagonal, map: MAPS[mapIndex].name, procedural: MAPS[mapIndex].procedural, uiHidden };
     render(ctx, canvasW, canvasH, field, endCoordinates, layers, controls, graphOverlay(), view());
     updateFps(now);
     requestAnimationFrame(frame);
