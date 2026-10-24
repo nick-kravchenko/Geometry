@@ -1,4 +1,4 @@
-import { Point, Rectangle } from './geometry';
+import { Circle, Point, pointToCircleDistance, Rectangle } from './geometry';
 import { CellMap } from './maps';
 
 export interface Canvas {
@@ -13,6 +13,8 @@ export interface Field {
   cellWidth: number,
   cellHeight: number,
   squares: Rectangle[], // blocked cells, for drawing
+  circles: Circle[], // round obstacles in pixels, for drawing
+  padding: number, // distance kept from obstacles, in pixels
   blockedCellsUint8Array: Uint8Array, // per pixel, 1 - blocked
   startPointCoordinates: Point,
   startPointNumber: number,
@@ -30,7 +32,7 @@ export function getCanvas(): Canvas {
   return { canvasElement, ctx, w, h };
 }
 
-export function buildField({ cellsX, cellsY, blocked, start, end }: CellMap, w: number, h: number): Field {
+export function buildField({ cellsX, cellsY, blocked, circles = [], start, end }: CellMap, w: number, h: number): Field {
   const cellWidth = ~~(w / cellsX);
   const cellHeight = ~~(h / cellsY);
   // center the map; whatever does not divide evenly stays as a blocked margin
@@ -60,6 +62,21 @@ export function buildField({ cellsX, cellsY, blocked, start, end }: CellMap, w: 
     }
   }
 
+  // round obstacles: a pixel is blocked when its center is within the padding of the circle's edge
+  const padding = paddingX;
+  const pixelCircles: Circle[] = circles.map(([[x, y], radius]: Circle): Circle => [
+    [offsetX + x * cellWidth, offsetY + y * cellHeight], radius * cellWidth,
+  ]);
+  for (const circle of pixelCircles) {
+    const [[centerX, centerY], radius] = circle;
+    const reach = radius + padding;
+    for (let y = Math.max(0, Math.floor(centerY - reach)); y < Math.min(h, Math.ceil(centerY + reach)); y++) {
+      for (let x = Math.max(0, Math.floor(centerX - reach)); x < Math.min(w, Math.ceil(centerX + reach)); x++) {
+        if (pointToCircleDistance([x + .5, y + .5], circle) <= padding) blockedCellsUint8Array[y * w + x] = 1;
+      }
+    }
+  }
+
   const center = ([cellX, cellY]: [number, number]): Point => [
     offsetX + ~~(cellX * cellWidth + cellWidth * .5),
     offsetY + ~~(cellY * cellHeight + cellHeight * .5),
@@ -70,6 +87,8 @@ export function buildField({ cellsX, cellsY, blocked, start, end }: CellMap, w: 
     cellWidth,
     cellHeight,
     squares,
+    circles: pixelCircles,
+    padding,
     blockedCellsUint8Array,
     startPointCoordinates,
     startPointNumber: startPointCoordinates[0] + startPointCoordinates[1] * w,

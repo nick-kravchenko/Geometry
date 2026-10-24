@@ -1,9 +1,11 @@
 import { buildField, Field, getCanvas } from '../get-data';
-import { Point } from '../geometry';
+import { Circle, Point } from '../geometry';
 import {
   aStarSearch,
   breadthFirstSearch,
   breadthFirstSearchDiagonal,
+  buildCircleGraph,
+  circleVisibilityGraphSearch,
   jumpPointSearch,
   obstacleOutlines,
   visibilityGraph,
@@ -93,8 +95,25 @@ function start(module: typeof import('pkg')): void {
   loadMap();
   // waypoints: WASM returns them flat as [x0, y0, x1, y1, ...]
   const toPoints = (flat: Float64Array): Point[] => Array.from({ length: flat.length / 2 }, (_: unknown, i: number): Point => [flat[2 * i], flat[2 * i + 1]]);
-  // label, color, path width, search, and whether the algorithm only makes sense with diagonal movement
-  const algorithms: [string, string, number, Search, boolean?][] = [
+  // Circle maps also get the circle visibility graph, which works on the circles themselves; obstacles
+  // are padded the same way as on the pixel grid.
+  const isCircleMap = (): boolean => field.circles.length > 0 && field.squares.length === 0;
+  const paddedCircles = (): Circle[] => field.circles.map(([center, radius]: Circle): Circle => [center, radius + field.padding]);
+
+  // why an algorithm can't run in the current mode, or null when it can
+  type Availability = (diagonal: boolean, circleMap: boolean) => string | null;
+  // the visibility graphs move at any angle, so they are only compared with the diagonal searches;
+  // curved edges are pixel staircases full of corners, too slow for the pixel visibility graph
+  const pixelVisibilityGraph: Availability = (diagonal: boolean, circleMap: boolean): string | null => (
+    !diagonal ? 'diagonal only' : circleMap ? 'not on circle maps' : null
+  );
+  const circleVisibilityGraph: Availability = (diagonal: boolean, circleMap: boolean): string | null => (
+    !diagonal ? 'diagonal only' : !circleMap ? 'circle maps only' : null
+  );
+  const always: Availability = (): null => null;
+
+  // label, color, path width, search, and when the algorithm can run
+  const algorithms: [string, string, number, Search, Availability?][] = [
     ['[WASM] BFS', wasmPathColor(COLORS.breadthFirst), 6, (end: number, diagonal: boolean): SearchResult => ({
       cells: pathfinder.breadth_first_search(from, end, diagonal),
     })],
@@ -116,14 +135,25 @@ function start(module: typeof import('pkg')): void {
     // the visibility graph moves at any angle, so it is only compared with the diagonal searches
     ['[WASM] Visibility graph', wasmPathColor(COLORS.visibilityGraph), 6, (end: number): SearchResult => ({
       points: toPoints(pathfinder.visibility_graph_search(from, end)),
-    }), true],
+    }), pixelVisibilityGraph],
     ['[TS] Visibility graph', COLORS.visibilityGraph, 2, (end: number): SearchResult => ({
       points: visibilityGraphSearch(grid, w, h, from, end),
-    }), true],
+    }), pixelVisibilityGraph],
+    ['[TS] Circle visibility graph', COLORS.visibilityGraph, 2, (): SearchResult => ({
+      points: circleVisibilityGraphSearch(paddedCircles(), field.startPointCoordinates, endCoordinates),
+    }), circleVisibilityGraph],
   ];
-  const layers: PathLayer[] = algorithms.map(([label, color, size, , diagonalOnly = false]): PathLayer => ({
-    label, color, size, time: NaN, visible: !settings.hidden.includes(label), enabled: !diagonalOnly || settings.diagonal,
+  const layers: PathLayer[] = algorithms.map(([label, color, size]): PathLayer => ({
+    label, color, size, time: NaN, visible: !settings.hidden.includes(label), enabled: true,
   }));
+  // marks which algorithms can run in the current mode and on the current map
+  const updateAvailability = (): void => {
+    algorithms.forEach(([, , , , availability = always]: [string, string, number, Search, Availability?], i: number) => {
+      const reason: string | null = availability(diagonal, isCircleMap());
+      layers[i].enabled = reason === null;
+      layers[i].disabledReason = reason ?? undefined;
+    });
+  };
   const save = (): void => saveSettings({
     map: MAPS[mapIndex].name,
     diagonal,
@@ -135,9 +165,16 @@ function start(module: typeof import('pkg')): void {
   let diagonal: boolean = settings.diagonal;
   let overlay: boolean = settings.overlay;
   let uiHidden: boolean = settings.uiHidden;
+  updateAvailability();
   // the overlay shows the graph the visibility graph searches, so only while that algorithm runs
   const graphOverlay = (): GraphOverlay | null => {
     if (!overlay || !diagonal) return null;
+    if (isCircleMap()) { // the circle visibility graph: padded circles, tangent points and segments
+      const circles: Circle[] = paddedCircles();
+      const graph = buildCircleGraph(circles, field.startPointCoordinates, endCoordinates);
+      const corners: Point[] = graph.x.slice(2).map((x: number, i: number): Point => [x, graph.y[i + 2]]);
+      return { outlines: [], outlineCircles: circles, corners, edges: graph.segments };
+    }
     outlines ??= obstacleOutlines(grid, w, h);
     return { outlines, ...visibilityGraph(grid, w, h, [from, end]) };
   };
@@ -146,7 +183,7 @@ function start(module: typeof import('pkg')): void {
   // Every frame searches again with every visible algorithm, as a game would while things move;
   // hidden algorithms are skipped, so hiding the slow ones raises the frame rate.
   function search(): void {
-    algorithms.forEach(([, , , run]: [string, string, number, Search, boolean?], i: number) => {
+    algorithms.forEach(([, , , run]: [string, string, number, Search, Availability?], i: number) => {
       const layer: PathLayer = layers[i];
       if (!layer.visible || !layer.enabled) return;
       const startTime: number = performance.now();
@@ -172,7 +209,7 @@ function start(module: typeof import('pkg')): void {
   function frame(now: number): void {
     search();
     const controls = { fps, diagonal, overlay, overlayAvailable: diagonal, map: MAPS[mapIndex].name, procedural: MAPS[mapIndex].procedural, uiHidden };
-    render(ctx, w, h, field.startPointCoordinates, endCoordinates, layers, controls, graphOverlay(), field.cellWidth, field.cellHeight, field.squares);
+    render(ctx, w, h, field.startPointCoordinates, endCoordinates, layers, controls, graphOverlay(), field.cellWidth, field.cellHeight, field.squares, field.circles);
     updateFps(now);
     requestAnimationFrame(frame);
   }
@@ -180,10 +217,8 @@ function start(module: typeof import('pkg')): void {
 
   const toggleDiagonal = (): void => {
     diagonal = !diagonal;
-    algorithms.forEach(([, , , , diagonalOnly = false]: [string, string, number, Search, boolean?], i: number) => {
-      layers[i].enabled = !diagonalOnly || diagonal;
-      layers[i].time = NaN; // timings of the other mode would skew the average
-    });
+    updateAvailability();
+    for (const layer of layers) layer.time = NaN; // timings of the other mode would skew the average
     save();
   };
   const toggleOverlay = (): void => {
@@ -198,6 +233,7 @@ function start(module: typeof import('pkg')): void {
     mapIndex = (mapIndex + 1) % MAPS.length;
     seed = DEFAULT_SEED;
     loadMap();
+    updateAvailability();
     resetTimes();
     save();
   };

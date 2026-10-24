@@ -1,4 +1,4 @@
-import { Point, Rectangle } from '../geometry';
+import { Circle, Point, Rectangle } from '../geometry';
 import { fillCells } from '../utils/fill-cells';
 import { COLORS } from './palette';
 
@@ -9,7 +9,8 @@ export interface PathLayer {
   size: number,
   time: number, // ms; NaN until measured
   visible: boolean, // shown or hidden by the user
-  enabled: boolean, // false when the algorithm does not apply to the current mode
+  enabled: boolean, // false when the algorithm does not apply to the current mode or map
+  disabledReason?: string, // shown instead of the time while disabled
   cells?: ArrayLike<number>,
   points?: Point[],
 }
@@ -37,6 +38,7 @@ export function render(
   cellWidth: number,
   cellHeight: number,
   squares: Rectangle[],
+  circles: Circle[],
 ): void {
   if (!ctx) return;
 
@@ -59,6 +61,15 @@ export function render(
     ctx.strokeRect(x, y, width, height);
     ctx.fillStyle = COLORS.obstacleLabel;
     if (showLabels) ctx.fillText(`${~~(x / cellWidth)},${~~(y / cellHeight)}`, x + width * .5, y + height * .5);
+  }
+
+  ctx.fillStyle = COLORS.obstacleFill;
+  ctx.strokeStyle = COLORS.obstacleStroke;
+  for (const [[x, y], radius] of circles) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
   }
 
   const circleSize = 12;
@@ -125,7 +136,7 @@ export function legendRowAt(ctx: CanvasRenderingContext2D, fontSize: number, lay
 function legendTimingX(ctx: CanvasRenderingContext2D, fontSize: number, layers: PathLayer[]): number {
   ctx.font = `300 ${fontSize}px/${fontSize}px "JetBrains Mono", sans-serif`;
   return fontSize * 2.5 + Math.max(...layers.map(({ label }) => ctx.measureText(label).width))
-    + fontSize * 2 + ctx.measureText('diagonal only').width;
+    + fontSize * 2 + ctx.measureText('not on circle maps').width;
 }
 
 function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number, layers: PathLayer[]): void {
@@ -133,7 +144,7 @@ function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number, layers: P
   // backdrop, so the legend stays readable over obstacles and paths
   drawPanel(ctx, 0, 0, timingX + fontSize, legendRowY(fontSize, layers.length - 1) + fontSize);
   ctx.textBaseline = 'middle';
-  layers.forEach(({ label, color, time, visible, enabled }, i: number) => {
+  layers.forEach(({ label, color, time, visible, enabled, disabledReason }, i: number) => {
     const y: number = legendRowY(fontSize, i);
     ctx.globalAlpha = visible && enabled ? 1 : .35; // hidden and disabled paths stay in the legend, dimmed
     ctx.fillStyle = color;
@@ -142,7 +153,7 @@ function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number, layers: P
     ctx.textAlign = 'left';
     ctx.fillText(label, fontSize * 2.5, y);
     ctx.textAlign = 'right';
-    ctx.fillText(!enabled ? 'diagonal only' : Number.isNaN(time) ? '–' : `${time.toFixed(1)} ms`, timingX, y);
+    ctx.fillText(!enabled ? disabledReason ?? '' : Number.isNaN(time) ? '–' : `${time.toFixed(1)} ms`, timingX, y);
   });
   ctx.globalAlpha = 1;
 }
@@ -218,11 +229,12 @@ function renderControls(ctx: CanvasRenderingContext2D, w: number, fontSize: numb
 // The visibility graph behind the path: obstacle outlines, corner nodes and edges between nodes.
 export interface GraphOverlay {
   outlines: [Point, Point][],
+  outlineCircles?: Circle[], // round obstacle outlines, for the circle visibility graph
   corners: Point[],
   edges: [Point, Point][],
 }
 
-function renderGraphOverlay(ctx: CanvasRenderingContext2D, { outlines, corners, edges }: GraphOverlay, cornerSize: number): void {
+function renderGraphOverlay(ctx: CanvasRenderingContext2D, { outlines, outlineCircles = [], corners, edges }: GraphOverlay, cornerSize: number): void {
   const strokeSegments = (segments: [Point, Point][], color: string, width: number): void => {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
@@ -235,6 +247,12 @@ function renderGraphOverlay(ctx: CanvasRenderingContext2D, { outlines, corners, 
   };
   strokeSegments(edges, COLORS.graphEdge, 1);
   strokeSegments(outlines, COLORS.graphOutline, 1.5);
+  ctx.beginPath();
+  for (const [[x, y], radius] of outlineCircles) {
+    ctx.moveTo(x + radius, y);
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+  }
+  ctx.stroke();
   ctx.fillStyle = COLORS.graphCorner;
   ctx.beginPath();
   for (const [x, y] of corners) {

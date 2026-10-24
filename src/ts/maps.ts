@@ -1,8 +1,13 @@
-// Demo maps on a coarse grid of cells, 1 - blocked, 0 - free. The demo scales them up to pixels.
+import { Circle, Point, pointToCircleDistance } from './geometry';
+
+// Demo maps on a coarse grid of cells, 1 - blocked, 0 - free, plus round obstacles. The demo scales
+// them up to pixels.
 export interface CellMap {
   cellsX: number,
   cellsY: number,
   blocked: Uint8Array,
+  // round obstacles in cell units: a center at (x, y) lies in cell (floor(x), floor(y))
+  circles?: Circle[],
   start: [number, number],
   end: [number, number],
 }
@@ -233,12 +238,50 @@ function cave(seed: number): CellMap {
   return { cellsX: size, cellsY: size, blocked, start: nearestFree(0, 0), end: nearestFree(size - 1, size - 1) };
 }
 
+const cellCenter = ([x, y]: [number, number]): Point => [x + .5, y + .5];
+
+// Circles of random size, kept apart from each other, the border, start and end by at least a cell
+// and a half, so the free space stays connected.
+function asteroids(seed: number): CellMap {
+  const rand: () => number = random(seed);
+  const size: number = 36, gap: number = 1.5;
+  const start: [number, number] = [2, 2], end: [number, number] = [size - 3, size - 3];
+  const circles: Circle[] = [];
+  for (let attempt = 0; attempt < 3000 && circles.length < 28; attempt++) {
+    const radius: number = 1 + rand() * 3;
+    const margin: number = radius + gap;
+    const center: Point = [margin + rand() * (size - 2 * margin), margin + rand() * (size - 2 * margin)];
+    const fits: boolean = circles.every((circle: Circle) => pointToCircleDistance(center, circle) >= radius + gap)
+      && pointToCircleDistance(cellCenter(start), [center, radius]) >= gap
+      && pointToCircleDistance(cellCenter(end), [center, radius]) >= gap;
+    if (fits) circles.push([center, radius]);
+  }
+  return { cellsX: size, cellsY: size, blocked: new Uint8Array(size * size), circles, start, end };
+}
+
+// A staggered grid of round pillars; every other row is shifted by half the spacing.
+function pillars(): CellMap {
+  const size: number = 36, spacing: number = 4, radius: number = 1.1;
+  const start: [number, number] = [1, 1], end: [number, number] = [size - 2, size - 2];
+  const circles: Circle[] = [];
+  for (let row = 0; 2 + row * spacing < size - 1; row++) {
+    for (let x = 2 + (row % 2) * spacing / 2; x < size - 1; x += spacing) {
+      const center: Point = [x, 2 + row * spacing];
+      const clear: boolean = [start, end].every((cell: [number, number]) => pointToCircleDistance(cellCenter(cell), [center, radius]) >= 1);
+      if (clear) circles.push([center, radius]);
+    }
+  }
+  return { cellsX: size, cellsY: size, blocked: new Uint8Array(size * size), circles, start, end };
+}
+
 export const MAPS: MapDefinition[] = [
   { name: 'Spiral', procedural: false, generate: spiral },
   { name: 'Maze', procedural: true, generate: connected(maze) },
   { name: 'Rooms', procedural: true, generate: connected(rooms) },
   { name: 'Scatter', procedural: true, generate: connected(scatter) },
   { name: 'Cave', procedural: true, generate: connected(cave) },
+  { name: 'Asteroids', procedural: true, generate: asteroids },
+  { name: 'Pillars', procedural: false, generate: pillars },
 ];
 
 export const DEFAULT_SEED: number = 1;

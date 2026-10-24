@@ -25,12 +25,24 @@ describe.each(MAPS)('$name map', ({ generate, procedural }) => {
 
   if (procedural) {
     it('gives a different layout for another seed', () => {
-      expect(generate(7).blocked).not.toEqual(generate(8).blocked);
+      expect(generate(7)).not.toEqual(generate(8));
     });
   }
 });
 
 describe('buildField', () => {
+  it('blocks a padded circle', () => {
+    // one circle of radius 2 cells in the middle of a 10x10 map of 97 px cells (padding 24 px)
+    const map: CellMap = { cellsX: 10, cellsY: 10, blocked: new Uint8Array(100), circles: [[[5, 5], 2]], start: [0, 0], end: [9, 9] };
+    const field: Field = buildField(map, 970, 970);
+    const isBlocked = (x: number, y: number): number => field.blockedCellsUint8Array[y * 970 + x];
+    expect(field.circles).toEqual([[[485, 485], 194]]);
+    expect(isBlocked(485, 485)).toBe(1); // center
+    expect(isBlocked(485 + 194 + 20, 485)).toBe(1); // within the padding
+    expect(isBlocked(485 + 194 + 30, 485)).toBe(0); // past it
+    expect(isBlocked(485 + 160, 485 + 160)).toBe(0); // diagonal, outside the round edge
+  });
+
   it('blocks the margin left when cells do not divide the canvas evenly', () => {
     // 25 cells of 38 px leave 22 px: 11 px on each side
     const map: CellMap = { cellsX: 25, cellsY: 25, blocked: new Uint8Array(25 * 25), start: [0, 0], end: [24, 24] };

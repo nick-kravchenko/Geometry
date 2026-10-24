@@ -6,19 +6,20 @@ Interactive canvas demo of 2D geometry algorithms and grid pathfinding, running 
 
 ## What it does
 
-Renders a 972×972 canvas, centered and scaled to fit the screen, with one of several maps (a hand-made spiral, or a generated maze, rooms, scattered pillars or cave). Pathfinding runs per pixel (944,784 cells), with obstacles padded by a quarter cell. Every frame, it searches from a start point to an end point with each visible algorithm and overlays the results:
+Renders a 972×972 canvas, centered and scaled to fit the screen, with one of several maps (a hand-made spiral, a generated maze, rooms, scattered blocks or cave, or round obstacles: random asteroids or a grid of pillars). Pathfinding runs per pixel (944,784 cells), with obstacles padded by a quarter cell. Every frame, it searches from a start point to an end point with each visible algorithm and overlays the results:
 
 - **[WASM] BFS** / **[TS] BFS** — breadth-first search
 - **[WASM] A\*** / **[TS] A\*** — A* search
 - **[WASM] JPS** / **[TS] JPS** — jump point search
 - **[WASM] Visibility graph** / **[TS] Visibility graph** — shortest any-angle path around obstacle corners
+- **[TS] Circle visibility graph** — shortest any-angle path around round obstacles, from the circles themselves (circle maps only)
 
 All UI is drawn on the canvas:
 
 - **Drag** anywhere on the field to move the end point; every algorithm re-routes live.
 - **Legend** (top left): click a row to show or hide that path. Hidden algorithms are not run, so hiding the slow ones raises the frame rate. Each row shows the algorithm's time per frame, smoothed over recent frames.
-- **Controls** (top right): frames per second, and the **Diagonal** toggle (or press `D`), which switches BFS, A* and JPS (TS and WASM) to 8-directional movement. The visibility graph moves at any angle, so it only runs with Diagonal on; without it, its rows show `diagonal only`. With Diagonal on, **Graph overlay** (or press `G`) draws the graph the visibility graph searches: obstacle outlines, corner nodes, and edges between nodes that can be part of a shortest path.
-- **Map** (`M`) cycles through Spiral, Maze, Rooms, Scatter and Cave; **New layout** (`R`) generates another layout of the current map (all but Spiral are generated from a seed, and always start from the same one). Every map keeps start and end connected.
+- **Controls** (top right): frames per second, and the **Diagonal** toggle (or press `D`), which switches BFS, A* and JPS (TS and WASM) to 8-directional movement. The visibility graphs move at any angle, so they only run with Diagonal on; without it, their rows show `diagonal only`. On circle maps the pixel visibility graph is off (`not on circle maps`): a circle's pixel edge is a staircase of thousands of corners, which slows it to hundreds of milliseconds; the circle visibility graph takes its place. With Diagonal on, **Graph overlay** (or press `G`) draws the graph the visibility graph searches: obstacle outlines, corner nodes, and edges between nodes that can be part of a shortest path. On circle maps it shows the circle visibility graph instead: padded circles, tangent points and tangent segments.
+- **Map** (`M`) cycles through Spiral, Maze, Rooms, Scatter, Cave, Asteroids and Pillars; **New layout** (`R`) generates another layout of the current map (Maze, Rooms, Scatter, Cave and Asteroids are generated from a seed, and always start from the same one). Every map keeps start and end connected.
 - **Hide UI** (`H`) hides the legend and controls when they cover the map; a small button brings them back.
 
 Colors come from the [Ocean Sunset](https://coolors.co/001219-005f73-0a9396-94d2bd-e9d8a6-ee9b00-ca6702-bb3e03-ae2012-9b2226) palette by Coolors, one hue per algorithm: each WASM path is drawn wide and translucent under its thin TS twin.
@@ -65,13 +66,14 @@ src/
       jump-point-search.ts             # JPS (4 or 8-directional)
       visibility-graph.ts              # Visibility graph building blocks, plus graph and outlines for display
       visibility-graph-search.ts       # Visibility graph search (any-angle, waypoints)
+      circle-visibility-graph-search.ts # Visibility graph on circles (tangents and arcs)
       *.test.ts                        # Vitest suites (edge cases, seeded random grids, brute-force references)
     wasm/
       index.ts                  # Loads WASM module, frame loop, input (drag, legend, controls)
       render.ts                 # Canvas rendering: field, paths, legend, controls panel
       palette.ts                # Colors (Coolors "Ocean Sunset" palette)
     utils/                      # Helpers: clamp, debounce, coordinate conversion, batched cell fill
-    maps.ts                     # Demo maps: spiral, maze, rooms, scatter, cave (seeded)
+    maps.ts                     # Demo maps: spiral, maze, rooms, scatter, cave, asteroids, pillars
     get-data.ts                 # Canvas setup; scales a map up to a padded pixel grid
 tests/
   app.rs                        # Rust integration tests for the WASM exports
@@ -177,6 +179,16 @@ Treats every blocked cell as a solid square and finds the shortest any-angle pat
 ```ts
 visibilityGraphSearch(blockedCells, w, h, start, end): Point[]
 ```
+
+### Circle visibility graph — TypeScript (`circleVisibilityGraphSearch`)
+
+Shortest path at any angle around disjoint circles, working on the circles rather than a pixel grid: nodes are the tangent points of lines from start and end to each circle and of the four bitangents between every two circles; tangent segments that miss every other circle are edges, and so are arcs between neighbouring tangent points along a circle. Dijkstra finds the shortest path, made of straight segments and arcs. Built from scratch on every call, so circles may move. Returns a polyline with arcs flattened into steps of at most `maxStep` pixels. `buildCircleGraph` exposes the graph for display.
+
+```ts
+circleVisibilityGraphSearch(circles, start, end, maxStep?): Point[]
+```
+
+On the demo's circle maps it takes about 1 ms (Asteroids, 26 circles) and 11 ms (Pillars, 75 circles) against 375 ms and 1 s for the pixel visibility graph on the same obstacles rasterized.
 
 ### WASM — Rust (`Pathfinder`)
 
