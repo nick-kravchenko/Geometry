@@ -5,7 +5,6 @@ export function breadthFirstSearch(
   start: number,
   end: number,
 ): number[] {
-  console.time('[JS] VAR DEFINITION');
   const gs: number = w * h >>> 0;
   const invW = 1 / w;
 
@@ -24,9 +23,7 @@ export function breadthFirstSearch(
   let ql: number = 1, qs: number = 0;
   q[0] = start;
   bc[start] |= 0x80;
-  console.timeEnd('[JS] VAR DEFINITION');
 
-  console.time('[JS] BFS LOOP');
   while (qs < ql) {
     const c: number = q[qs++]; // getting next cell from the queue
 
@@ -52,9 +49,7 @@ export function breadthFirstSearch(
       if ((mt & 0x81) === 0) { bc[t] = mt | 0x82; q[ql++] = t; } // dir DOWN(1<<1) back to parent
     }
   }
-  console.timeEnd('[JS] BFS LOOP');
 
-  console.time('[JS] PATH RECONSTRUCTION');
   if (!(bc[end] & 0x80)) return [];
 
   const path: number[] = [];
@@ -68,7 +63,6 @@ export function breadthFirstSearch(
     else if (dir === 1) i += w; // DOWN
     else                i += 1; // RIGHT (dir === 0)
   } while (true);
-  console.timeEnd('[JS] PATH RECONSTRUCTION');
 
   return path.reverse();
 }

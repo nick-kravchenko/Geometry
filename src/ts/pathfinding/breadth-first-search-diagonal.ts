@@ -15,12 +15,12 @@ export function breadthFirstSearchDiagonal(
   if (blockedCellsUint8Array[start] === 1 || blockedCellsUint8Array[end] === 1) return []; // start or end cell is blocked
   if (start === end) return [start]; // start and end cells are the same
 
-  console.time('[TS] BFS memory allocation');
   const bufferSize: number = (gridSize << 3) + gridSize;
   const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
   const queue: Uint32Array = new Uint32Array(buffer, 0, gridSize);
   const parents: Int32Array = new Int32Array(buffer, gridSize * 4, gridSize);
         parents.fill(-1);
+        parents[start] = start; // marking start as visited
   const blockedCells: Uint8Array = new Uint8Array(buffer, gridSize * 8, gridSize);
         blockedCells.set(blockedCellsUint8Array);
   let c: number = queue[0] = start; // c for current cell
@@ -29,9 +29,7 @@ export function breadthFirstSearchDiagonal(
   let queueLength: number = 1, queueStart: number = 0;
   let l: number, r: number, t: number, b: number, tl: number, tr: number, bl: number, br: number;
   let canMoveLeft: boolean, canMoveRight: boolean, canMoveUp: boolean, canMoveDown: boolean;
-  console.timeEnd('[TS] BFS memory allocation');
 
-  console.time('[TS] BFS main loop');
   while (queueStart < queueLength) {
     c = queue[queueStart++]; // getting next cell from the queue
 
@@ -113,17 +111,16 @@ export function breadthFirstSearchDiagonal(
       parents[br] = c;
     }
   }
-  console.timeEnd('[TS] BFS main loop');
 
-  console.time('[TS] BFS path construction');
+  if (parents[end] === -1) return []; // end is unreachable
+
   const path: number[] = [];
   let i: number = end;
-  while (i !== undefined) {
+  while (true) {
     path.push(i);
     if (i === start) break;
     i = parents[i];
   }
-  console.timeEnd('[TS] BFS path construction');
 
   return path.reverse();
 }

@@ -20,7 +20,7 @@ import {
 import {
   mergeRectanglesInArray,
   mergeRectanglesIfIntersect,
-} from './merges'
+} from './merges';
 import {
   Point,
   Line,
@@ -62,4 +62,4 @@ export {
   rotateLine,
   scalePoint,
   scaleLine,
-}
+};

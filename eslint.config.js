@@ -1,23 +1,19 @@
-const typescriptParser = require('@typescript-eslint/parser');
-const typescriptPlugin = require('@typescript-eslint/eslint-plugin');
+const tseslint = require('typescript-eslint');
 
-module.exports = [
+module.exports = tseslint.config(
   {
-    // Specify which file extensions should be linted
-    files: ['**/*.ts'], // Or you can specify more specific patterns
+    ignores: ['dist/**', 'pkg/**', 'target/**', 'node_modules/**'],
+  },
+  {
+    files: ['**/*.ts'],
     languageOptions: {
-      parser: typescriptParser, // Use TypeScript parser
-      ecmaVersion: 2023,        // ECMAScript version
-      sourceType: 'module',     // For ES Modules
+      parser: tseslint.parser,
+      ecmaVersion: 2023,
+      sourceType: 'module',
     },
     plugins: {
-      '@typescript-eslint': typescriptPlugin,
+      '@typescript-eslint': tseslint.plugin,
     },
-    ignores: [
-      "**/node_modules/**",
-      '**/wasm/**',
-      '**/dist/**',
-    ],
     rules: {
       '@typescript-eslint/explicit-function-return-type': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
@@ -26,6 +22,13 @@ module.exports = [
       '@typescript-eslint/consistent-type-definitions': ['error', 'interface'],
       'max-nested-callbacks': ['error', 2],
       'max-depth': ['error', 4],
-    }
-  }
-];
+    },
+  },
+  {
+    // describe/it blocks add two levels of nesting on their own
+    files: ['**/*.test.ts'],
+    rules: {
+      'max-nested-callbacks': ['error', 4],
+    },
+  },
+);

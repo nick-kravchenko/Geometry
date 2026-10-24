@@ -1,21 +1,27 @@
 import { Point, Rectangle } from '../geometry';
-import { shotPixelByNumber } from '../utils/shot-pixel-by-number';
+import { fillCells } from '../utils/fill-cells';
+
+const PATHS: { label: string, color: string, size: number }[] = [
+  { label: '[WASM] BFS', color: 'hsla(60, 100%, 50%, 0.75)', size: 6 },
+  { label: '[TS] BFS', color: 'hsla(180, 100%, 50%, 0.75)', size: 3 },
+  { label: '[TS] A*', color: 'hsla(0, 100%, 50%, 0.75)', size: 2 },
+];
 
 export function render(
-  canvasElement: HTMLCanvasElement,
   ctx: CanvasRenderingContext2D | null,
   w: number,
   h: number,
   startPointCoords: Point,
   endPointCoords: Point,
+  pathBFSWASM: ArrayLike<number>,
   pathBFSTS: number[],
   pathAStarTS: number[],
   cellWidth: number,
   cellHeight: number,
   cellsY: number,
   squares: Rectangle[],
-) {
-  if (!ctx) return
+): void {
+  if (!ctx) return;
 
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = 'hsla(120, 25%, 50%, 1)';
@@ -38,22 +44,9 @@ export function render(
 
   const circleSize = Math.min(cellWidth, cellHeight) * .25;
 
-  pathBFSTS.forEach((cell: number) => {
-    shotPixelByNumber(
-      canvasElement,
-      w,
-      cell,
-      'hsla(180, 100%, 50%, 0.5)',
-    );
-  });
-
-  pathAStarTS.forEach((cell: number) => {
-    shotPixelByNumber(
-      canvasElement,
-      w,
-      cell,
-      'hsla(0, 100%, 50%, 0.5)',
-    );
+  // widest first, so overlapping paths stay visible
+  [pathBFSWASM, pathBFSTS, pathAStarTS].forEach((path: ArrayLike<number>, i: number) => {
+    fillCells(ctx, w, path, PATHS[i].color, PATHS[i].size);
   });
 
   ctx.fillStyle = 'hsla(0, 50%, 50%, .5)';
@@ -69,4 +62,19 @@ export function render(
   ctx.arc(startPointX, startPointY, circleSize, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
+
+  renderLegend(ctx, cellHeight * .3);
+}
+
+function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number): void {
+  ctx.font = `300 ${fontSize}px/${fontSize}px "JetBrains Mono", sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  PATHS.forEach(({ label, color }, i: number) => {
+    const y: number = fontSize * (1 + i * 1.5);
+    ctx.fillStyle = color;
+    ctx.fillRect(fontSize, y - fontSize * .25, fontSize, fontSize * .5);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, fontSize * 2.5, y);
+  });
 }

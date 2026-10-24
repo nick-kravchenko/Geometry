@@ -1,6 +1,35 @@
 import { Point, Rectangle } from './geometry';
 
-export function getData() {
+interface Field {
+  cellsNumbers: number[],
+  cellsCoords: number[][],
+  blockedCellsNumbers: number[],
+  blockedCellsCoords: number[][],
+  startPointCoords: number[],
+  startPointNumber: number,
+  endPointCoords: number[],
+  endPointNumber: number,
+}
+
+export interface Data {
+  canvasElement: HTMLCanvasElement,
+  ctx: CanvasRenderingContext2D | null,
+  w: number,
+  h: number,
+  cellsX: number,
+  cellsY: number,
+  cellWidth: number,
+  cellHeight: number,
+  startPointCoords: Point,
+  startPointNumber: number,
+  endPointCoords: Point,
+  endPointNumber: number,
+  squares: Rectangle[],
+  field: Field,
+  blockedCellsUint8Array: Uint8Array,
+}
+
+export function getData(): Data {
   const canvasElement = document.getElementById('main-canvas') as HTMLCanvasElement;
   const ctx = canvasElement.getContext('2d');
   let w = 972;
@@ -11,22 +40,13 @@ export function getData() {
   const cellsY = 18;
   const cellWidth = ~~(w / cellsX);
   const cellHeight = ~~(h / cellsY);
-  let startPointCoords: Point = [~~(8 * cellWidth + cellWidth * .5), ~~(8 * cellWidth) + cellHeight * .5];
+  let startPointCoords: Point = [~~(8 * cellWidth + cellWidth * .5), ~~(8 * cellHeight + cellHeight * .5)];
   let startPointNumber = startPointCoords[0] + startPointCoords[1] * w;
-  let endPointCoords: Point = [~~(11 * cellHeight + cellWidth * .5), ~~(13 * cellHeight) + cellHeight * .5];
+  let endPointCoords: Point = [~~(11 * cellWidth + cellWidth * .5), ~~(13 * cellHeight + cellHeight * .5)];
   let endPointNumber = endPointCoords[0] + endPointCoords[1] * w;
   let squares: Rectangle[] = [];
   let blockedCellsUint8Array = new Uint8Array(w * h).fill(0b0);
-  const field: {
-    cellsNumbers: number[],
-    cellsCoords: number[][],
-    blockedCellsNumbers: number[],
-    blockedCellsCoords: number[][],
-    startPointCoords: number[],
-    startPointNumber: number,
-    endPointCoords: number[],
-    endPointNumber: number,
-  } = {
+  const field: Field = {
     cellsNumbers: [],
     cellsCoords: [],
     blockedCellsNumbers: [],
@@ -39,17 +59,17 @@ export function getData() {
   for (let y = 0; y < cellsY; y++) {
     for (let x = 0; x < cellsX; x++) {
       field.cellsNumbers.push(x + y * cellsX);
-      field.cellsCoords.push([x * cellsX, y * cellsY]);
+      field.cellsCoords.push([x * cellWidth, y * cellHeight]);
     }
   }
-  function addSquare(x: number, y: number) {
+  function addSquare(x: number, y: number): void {
     const point: [number, number] = [x * cellWidth, y * cellHeight];
     const square: Rectangle = [point, cellWidth, cellHeight];
     squares.push(square);
     field.blockedCellsNumbers.push(x + y * cellsX);
-    field.blockedCellsCoords.push([x * cellsX, y * cellsY]);
+    field.blockedCellsCoords.push([x * cellWidth, y * cellHeight]);
   }
-  function setSquares() {
+  function setSquares(): void {
     squares = [];
     addSquare(4, 4);
     addSquare(5, 3);
@@ -74,11 +94,17 @@ export function getData() {
     for (let y = 8; y <= 8; y++) addSquare(9, y);
   }
   setSquares();
-  const offset = 0;
+  // obstacles are padded by a quarter cell so paths keep some distance from walls
+  const paddingX = ~~(cellWidth * .25);
+  const paddingY = ~~(cellHeight * .25);
   for (const square of squares) {
     const [squareX, squareY]: [number, number] = square[0];
-    for (let x = squareX - offset - ~~(cellWidth * .25); x < squareX + square[1] + offset + ~~(cellWidth * .25); x++) {
-      for (let y = squareY - offset - ~~(cellWidth * .25); y < squareY + square[2] + offset + ~~(cellWidth * .25); y++) {
+    const fromX = Math.max(0, squareX - paddingX);
+    const toX = Math.min(w, squareX + square[1] + paddingX);
+    const fromY = Math.max(0, squareY - paddingY);
+    const toY = Math.min(h, squareY + square[2] + paddingY);
+    for (let y = fromY; y < toY; y++) {
+      for (let x = fromX; x < toX; x++) {
         const index = x + y * w;
         field.blockedCellsNumbers.push(index);
         blockedCellsUint8Array[index] = 0b1;

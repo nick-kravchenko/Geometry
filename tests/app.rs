@@ -1,31 +1,13 @@
-use wasm_bindgen_test::{wasm_bindgen_test_configure, wasm_bindgen_test};
-use wasm_bindgen::JsValue;
-use wasm_bindgen_futures::JsFuture;
+use geometry::wasm_breadth_first_search;
 
-wasm_bindgen_test_configure!(run_in_browser);
-
-
-// This runs a unit test in native Rust, so it can only use Rust APIs.
 #[test]
-fn rust_test() {
-    assert_eq!(1, 1);
+fn exported_bfs_finds_path() {
+    // 3x2 grid, wall at (1,0) forces the path down and back up
+    let grid = [0, 1, 0, 0, 0, 0];
+    assert_eq!(wasm_breadth_first_search(&grid, 3, 2, 0, 2), vec![0, 3, 4, 5, 2]);
 }
 
-
-// This runs a unit test in the browser, so it can use browser APIs.
-#[wasm_bindgen_test]
-fn web_test() {
-    assert_eq!(1, 1);
-}
-
-
-// This runs a unit test in the browser, and in addition it supports asynchronous Future APIs.
-#[wasm_bindgen_test(async)]
-async fn async_test() {
-    // Creates a JavaScript Promise which will asynchronously resolve with the value 42.
-    let promise = js_sys::Promise::resolve(&JsValue::from(42));
-
-    // Converts that Promise into a Future and awaits it.
-    let x = JsFuture::from(promise).await.unwrap();
-    assert_eq!(x, JsValue::from(42));
+#[test]
+fn exported_bfs_returns_empty_when_unreachable() {
+    assert!(wasm_breadth_first_search(&[0, 1, 0], 3, 1, 0, 2).is_empty());
 }

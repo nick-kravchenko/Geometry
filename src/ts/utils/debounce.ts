@@ -1,10 +1,8 @@
-export function debounce(callback: Function, delay: number): Function {
-  let timeout: NodeJS.Timeout;
+export function debounce<A extends unknown[]>(callback: (...args: A) => void, delay: number): (...args: A) => void {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
 
-  // eslint-disable-next-line
-  return function (...args: any[]) {
+  return (...args: A): void => {
     clearTimeout(timeout);
-    // @ts-ignore
-    timeout = setTimeout(() => callback.apply(this, args), delay);
+    timeout = setTimeout(() => callback(...args), delay);
   };
 }
