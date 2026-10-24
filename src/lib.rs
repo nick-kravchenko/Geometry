@@ -1,5 +1,4 @@
 use wasm_bindgen::prelude::*;
-use web_sys::js_sys::Uint8Array;
 mod rust;
 use crate::rust::pathfinding::breadth_first_search::breadth_first_search;
 
@@ -14,14 +13,11 @@ pub fn main_js() -> Result<(), JsValue> {
 
 #[wasm_bindgen]
 pub fn wasm_breadth_first_search(
-    memory: JsValue,
+    blocked_cells_numbers: &[u8],
     w: u32,
     h: u32,
     start: u32,
     end: u32,
 ) -> Vec<u32> {
-    let memory: Uint8Array = Uint8Array::new(&memory);
-    let blocked_cells_numbers: Vec<u8> = memory.to_vec();
-    let path: Vec<u32> = breadth_first_search(&blocked_cells_numbers, w, h, start, end);
-    path
+    breadth_first_search(blocked_cells_numbers, w, h, start, end)
 }

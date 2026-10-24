@@ -3,6 +3,17 @@ updates:
 - package-ecosystem: cargo
   directory: "/"
   schedule:
-    interval: daily
-    time: "08:00"
+    interval: weekly
   open-pull-requests-limit: 10
+- package-ecosystem: npm
+  directory: "/"
+  schedule:
+    interval: weekly
+  open-pull-requests-limit: 10
+  groups:
+    dev-dependencies:
+      dependency-type: development
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: weekly

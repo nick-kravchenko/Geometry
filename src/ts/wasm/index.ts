@@ -2,12 +2,11 @@ import { getData } from '../get-data';
 import { AStarSearch, breadthFirstSearch } from '../pathfinding';
 import { render } from './render';
 
-function start(module: typeof import('pkg')) {
+function start(module: typeof import('pkg')): void {
   const {
     wasm_breadth_first_search,
   } = module;
-  let {
-    canvasElement,
+  const {
     ctx,
     w,
     h,
@@ -23,39 +22,35 @@ function start(module: typeof import('pkg')) {
   } = getData();
   if (!ctx) return;
 
-  const sharedBlockedCellsBuffer = new SharedArrayBuffer(blockedCellsUint8Array.length);
-  const sharedBlockedCellsArray = new Uint8Array(sharedBlockedCellsBuffer);
-        sharedBlockedCellsArray.set(blockedCellsUint8Array);
-
   console.time('[WASM] BFS');
-  const pathBFSWASM = wasm_breadth_first_search(sharedBlockedCellsBuffer, w, h, startPointNumber, endPointNumber);
-  console.timeEnd(`[WASM] BFS`);
+  const pathBFSWASM = wasm_breadth_first_search(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber);
+  console.timeEnd('[WASM] BFS');
 
   console.time('[TS] BFS');
   const pathBFSTS: number[] = breadthFirstSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber);
-  console.timeEnd(`[TS] BFS`);
+  console.timeEnd('[TS] BFS');
 
   console.time('[TS] A-Star search');
-  const pathAStarTS: number[]|null = AStarSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false);
-  console.timeEnd(`[TS] A-Star search`);
+  const pathAStarTS: number[] = AStarSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false);
+  console.timeEnd('[TS] A-Star search');
 
   render(
-    canvasElement,
     ctx,
     w,
     h,
     startPointCoords,
     endPointCoords,
+    pathBFSWASM,
     pathBFSTS,
     pathAStarTS,
     cellWidth,
     cellHeight,
     cellsY,
     squares,
-  )
+  );
 }
 
-async function load() {
+async function load(): Promise<void> {
   start(await import('pkg'));
 }
 

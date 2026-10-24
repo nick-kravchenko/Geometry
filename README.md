@@ -6,13 +6,13 @@ Interactive canvas demo of 2D geometry algorithms and grid pathfinding, running 
 
 ## What it does
 
-Renders a fullscreen grid with random obstacles. On load, runs three pathfinding algorithms from a start point to an end point and overlays the results:
+Renders a fixed 972×972 canvas with an 18×18 grid of hand-placed obstacles. Pathfinding runs per pixel (944,784 cells), with obstacles padded by a quarter cell. On load, it runs three pathfinding algorithms from a start point to an end point and overlays the results, with a legend in the top-left corner:
 
 - **[WASM] BFS** — Rust breadth-first search compiled to WebAssembly
 - **[TS] BFS** — TypeScript breadth-first search (4-directional)
 - **[TS] A\*** — TypeScript A* search with optional diagonal movement
 
-Paths are timed in the browser console (`console.time`) so you can compare TS vs WASM performance directly.
+Each algorithm is timed once in the browser console (`console.time`) so you can compare TS vs WASM performance directly.
 
 ## Stack
 
@@ -30,7 +30,7 @@ Paths are timed in the browser console (`console.time`) so you can compare TS vs
 src/
   rust/
     pathfinding/
-      breadth_first_search.rs   # BFS compiled to WASM
+      breadth_first_search.rs   # BFS compiled to WASM (+ unit tests)
   ts/
     geometry/
       shapes.ts                 # Point, Line, Rectangle, Circle types
@@ -39,14 +39,18 @@ src/
       transformations.ts        # Translate, rotate, scale
       conversions.ts            # Rect → lines/points/sides
       merges.ts                 # Rectangle merging
+      geometry.test.ts          # Vitest suite
     pathfinding/
       breadth-first-search.ts          # BFS (4-directional, bit-packed)
       breadth-first-search-diagonal.ts # BFS (8-directional with corner checks)
       a-star-search.ts                 # A* (4 or 8-directional, binary-heap queue)
+      pathfinding.test.ts              # Vitest suite (edge cases + seeded random grids)
     wasm/
       index.ts                  # Loads WASM module, runs algorithms, calls render
       render.ts                 # Canvas rendering
-    utils/                      # Helpers: clamp, debounce, coord conversion, pixel ops
+    utils/                      # Helpers: clamp, debounce, coord conversion, batched cell fill
+tests/
+  app.rs                        # Rust integration tests for the WASM export
 ```
 
 ## Geometry library (TypeScript)
@@ -128,7 +132,7 @@ breadthFirstSearchDiagonal(blockedCells, w, h, start, end): number[]
 
 ### A\* — TypeScript (`AStarSearch`)
 
-Binary-search insertion into a sorted queue (sorted by f-score). Heuristic: Manhattan distance (4-dir) or Chebyshev distance (8-dir).
+Indexed binary min-heap open set keyed by f-score (decrease-key, no duplicate entries). Heuristic: Manhattan distance (4-dir) or Chebyshev distance (8-dir).
 
 ```ts
 AStarSearch(blockedCells, w, h, start, end, diagonal?): number[]
@@ -136,19 +140,20 @@ AStarSearch(blockedCells, w, h, start, end, diagonal?): number[]
 
 ### BFS — Rust/WASM (`wasm_breadth_first_search`)
 
-Same algorithm as the TS version, compiled to WASM. Accepts a `SharedArrayBuffer`. Called via the generated `pkg` bindings.
+Same algorithm as the TS version, compiled to WASM. Accepts a plain `Uint8Array` (copied into WASM memory by `wasm-bindgen`). Called via the generated `pkg` bindings.
 
 ```ts
-wasm_breadth_first_search(sharedBuffer, w, h, start, end): number[]
+wasm_breadth_first_search(blockedCells, w, h, start, end): Uint32Array
 ```
 
 ## Setup
 
-Requires: Node.js, Rust, `wasm-pack`
+Requires: Node.js, Rust (with the `wasm32-unknown-unknown` target), `wasm-pack`
 
 ```sh
 # Install wasm-pack
 cargo install wasm-pack
+rustup target add wasm32-unknown-unknown
 
 # Install JS deps
 npm install
@@ -159,10 +164,14 @@ npm start
 # Production build → dist/
 npm run build
 
-# Tests (Rust unit tests + wasm-bindgen headless tests)
+# Tests (Rust unit + integration tests, Vitest)
 npm test
+
+# Lint and typecheck
+npm run lint
+npm run typecheck
 ```
 
 ## Deploy
 
-Pushes to `master` trigger the GitHub Actions workflow (`.github/workflows/jekyll-gh-pages.yml`), which builds the project and deploys `dist/` to GitHub Pages automatically.
+Pushes to `master` trigger the GitHub Actions workflow (`.github/workflows/deploy.yml`), which lints, typechecks, tests, builds the project and deploys `dist/` to GitHub Pages automatically.
