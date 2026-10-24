@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashSet, VecDeque};
+use std::collections::{BinaryHeap, VecDeque};
 use std::f64::consts::PI;
 
 const NONE: usize = usize::MAX;
@@ -10,6 +10,9 @@ const MOVING_REACH: f64 = 160.0;
 // the longest edge, and how far start and end look for nodes first: 200 m on Kyiv. Longer lines of sight
 // go through nodes on the way, at a small cost in length.
 const EDGE_REACH: f64 = 800.0;
+// how far start and end look for nodes first, then EDGE_REACH, then everywhere: 100 m on Kyiv. Linking
+// is most of a search's time, and nearer nodes are fewer.
+const LINK_REACH: f64 = 400.0;
 
 // A moving obstacle: center x, center y, radius, already grown by the mover's radius.
 pub type Circle = (f64, f64, f64);
@@ -97,7 +100,8 @@ struct Buffers {
   distances: Vec<f64>,
   parents: Vec<usize>,
   closed: Vec<bool>,
-  near: Vec<u32>,
+  near: Vec<u32>, // bucket lookups
+  candidates: Vec<u32>, // nodes near a node, for relax_near
 }
 
 // Items bucketed into square cells by their bounding boxes.
@@ -140,6 +144,35 @@ impl Buckets {
 
   fn range(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> (usize, usize, usize, usize) {
     (self.cell(min_x, self.columns), self.cell(max_x, self.columns), self.cell(min_y, self.rows), self.cell(max_y, self.rows))
+  }
+
+  // The items in the cells along the segment, in order from (x0, y0) (Amanatides–Woo), into out; an item
+  // may come up more than once.
+  fn along(&self, x0: f64, y0: f64, x1: f64, y1: f64, out: &mut Vec<u32>) {
+    out.clear();
+    let size = self.cell_size;
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let (cx0, cy0) = ((x0 + 1.0) / size, (y0 + 1.0) / size);
+    let (mut column, mut row) = (cx0.floor() as i64, cy0.floor() as i64);
+    let (end_column, end_row) = (((x1 + 1.0) / size).floor() as i64, ((y1 + 1.0) / size).floor() as i64);
+    let (step_x, step_y) = (if dx > 0.0 { 1 } else { -1 }, if dy > 0.0 { 1 } else { -1 });
+    let delta_x = if dx == 0.0 { f64::INFINITY } else { (size / dx).abs() };
+    let delta_y = if dy == 0.0 { f64::INFINITY } else { (size / dy).abs() };
+    let mut next_x = if dx > 0.0 { (column as f64 + 1.0 - cx0) * size / dx } else if dx < 0.0 { (column as f64 - cx0) * size / dx } else { f64::INFINITY };
+    let mut next_y = if dy > 0.0 { (row as f64 + 1.0 - cy0) * size / dy } else if dy < 0.0 { (row as f64 - cy0) * size / dy } else { f64::INFINITY };
+    for _ in 0..=(end_column - column).abs() + (end_row - row).abs() {
+      if column >= 0 && row >= 0 && (column as usize) < self.columns && (row as usize) < self.rows {
+        let c = row as usize * self.columns + column as usize;
+        out.extend_from_slice(&self.indices[self.offsets[c]..self.offsets[c + 1]]);
+      }
+      if next_x < next_y {
+        column += step_x;
+        next_x += delta_x;
+      } else {
+        row += step_y;
+        next_y += delta_y;
+      }
+    }
   }
 
   // The items in the cells overlapping the box, into out; an item may come up more than once.
@@ -508,7 +541,7 @@ impl Query<'_> {
     let (dx, dy) = (x1 - x0, y1 - y0);
     let length_squared = dx * dx + dy * dy;
     let mut near = std::mem::take(&mut self.b.near);
-    self.circle_cells.near(x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1), &mut near);
+    self.circle_cells.along(x0, y0, x1, y1, &mut near);
     let mut blocking = NONE;
     for &circle in &near {
       let circle = circle as usize;
@@ -557,12 +590,12 @@ impl Query<'_> {
 
   // Links a point, through an escape point extra pixels away if given, to the node if it sees it. Adds
   // the node's component to components when it sees it past the walls, circles or not.
-  fn reach_node(&mut self, to_end: bool, point: (f64, f64), extra: f64, escape: Option<(f64, f64)>, node: usize, components: &mut Option<&mut HashSet<u32>>) -> bool {
+  fn reach_node(&mut self, to_end: bool, point: (f64, f64), extra: f64, escape: Option<(f64, f64)>, node: usize, components: &mut Option<&mut Vec<u32>>) -> bool {
     let (nx, ny) = self.position(node);
     let distance = extra + length(nx - point.0, ny - point.1);
     let cost = if to_end { self.b.to_end[node] } else { self.b.from_start[node] };
     if distance >= cost || !self.b.nodes.wraps(node, point) || !self.walls_visible(point, (nx, ny)) { return false; }
-    if let Some(set) = components && node < self.graph.nodes.len() { set.insert(self.graph.components[node]); }
+    if let Some(list) = components && node < self.graph.nodes.len() && !list.contains(&self.graph.components[node]) { list.push(self.graph.components[node]); }
     let circle = self.blocking_circle(point, (nx, ny));
     if circle != NONE {
       self.activate(circle);
@@ -573,7 +606,7 @@ impl Query<'_> {
   }
 
   #[allow(clippy::too_many_arguments)]
-  fn reach(&mut self, to_end: bool, point: (f64, f64), extra: f64, escape: Option<(f64, f64)>, from: usize, to: usize, components: &mut Option<&mut HashSet<u32>>) -> bool {
+  fn reach(&mut self, to_end: bool, point: (f64, f64), extra: f64, escape: Option<(f64, f64)>, from: usize, to: usize, components: &mut Option<&mut Vec<u32>>) -> bool {
     let mut linked = false;
     for node in from..to { linked |= self.reach_node(to_end, point, extra, escape, node, components); }
     linked
@@ -581,13 +614,16 @@ impl Query<'_> {
 
   // the same for the graph's nodes within MOVING_REACH and the temporary ones: for the many escape
   // points around a point stuck in a corner
-  fn reach_near(&mut self, to_end: bool, (ex, ey): (f64, f64), extra: f64, components: &mut Option<&mut HashSet<u32>>) {
-    let mut near = Vec::new();
+  fn reach_near(&mut self, to_end: bool, (ex, ey): (f64, f64), extra: f64, components: &mut Option<&mut Vec<u32>>) -> bool {
+    let mut near = std::mem::take(&mut self.b.candidates);
     self.graph.node_cells.near(ex - MOVING_REACH, ey - MOVING_REACH, ex + MOVING_REACH, ey + MOVING_REACH, &mut near);
-    for node in near { self.reach_node(to_end, (ex, ey), extra, Some((ex, ey)), node as usize, components); }
+    let mut linked = false;
+    for &node in &near { linked |= self.reach_node(to_end, (ex, ey), extra, Some((ex, ey)), node as usize, components); }
+    self.b.candidates = near;
     let (n, total) = (self.graph.nodes.len(), self.b.nodes.len());
-    self.reach(to_end, (ex, ey), extra, Some((ex, ey)), n, total, components);
+    self.reach(to_end, (ex, ey), extra, Some((ex, ey)), n, total, components) || linked
   }
+
 
   // A point a few pixels off the outline nearest to (px, py), or None: pushed away from it twice, in case
   // the first push lands within another outline, as in a corner.
@@ -624,22 +660,15 @@ impl Query<'_> {
   // outline and see no node. It then links through an escape point pushed off that outline, or failing
   // that, through escape points around it, reached over free pixels; returns the escapes, so temporary
   // nodes can link through them too.
-  fn link(&mut self, to_end: bool, point: (f64, f64), components: &mut HashSet<u32>) -> Vec<(f64, f64)> {
+  fn link(&mut self, to_end: bool, point: (f64, f64), components: &mut Vec<u32>) -> Vec<(f64, f64)> {
     let mut components = Some(components);
-    // nodes within EDGE_REACH, then all of them if none of those
-    let (n, total) = (self.graph.nodes.len(), self.b.nodes.len());
-    let mut near = Vec::new();
-    self.graph.node_cells.near(point.0 - EDGE_REACH, point.1 - EDGE_REACH, point.0 + EDGE_REACH, point.1 + EDGE_REACH, &mut near);
-    let mut linked = false;
-    for node in near { linked |= self.reach_node(to_end, point, 0.0, None, node as usize, &mut components); }
-    if self.reach(to_end, point, 0.0, None, n, total, &mut components) || linked || self.reach(to_end, point, 0.0, None, 0, n, &mut components) {
-      return Vec::new();
-    }
-    if let Some(pushed) = self.push_off(point) {
-      let total = self.b.nodes.len();
-      if self.reach(to_end, pushed, length(pushed.0 - point.0, pushed.1 - point.1), Some(pushed), 0, total, &mut components) { return vec![pushed]; }
+    if self.reach_within(to_end, point, 0.0, None, &mut components) { return Vec::new(); }
+    if let Some(pushed) = self.push_off(point)
+      && self.reach_within(to_end, pushed, length(pushed.0 - point.0, pushed.1 - point.1), Some(pushed), &mut components) {
+      return vec![pushed];
     }
     let mut escapes = Vec::new();
+    let mut linked = false;
     for radius in [2.0, 4.0, 8.0] {
       for k in 0..16 {
         let angle = k as f64 * PI / 8.0;
@@ -647,13 +676,30 @@ impl Query<'_> {
         if !is_segment_clear(self.grid, self.w, self.h, point.0, point.1, escape.0, escape.1) || self.in_circle(escape) { continue; }
         if self.blocking_circle(point, escape) != NONE { continue; }
         escapes.push(escape);
-        self.reach_near(to_end, escape, radius, &mut components);
+        linked |= self.reach_near(to_end, escape, radius, &mut components);
       }
-      let via = if to_end { &self.b.end_via } else { &self.b.start_via };
-      if via.iter().any(|escape| escape.is_some()) { break; }
+      if linked { break; }
     }
+    // last: every node, seen from the point itself
+    if !linked { self.reach(to_end, point, 0.0, None, 0, self.graph.nodes.len(), &mut components); }
     escapes
   }
+
+  // Links the point, reached through escape extra pixels away if given, to the temporary nodes and the
+  // graph's nodes within LINK_REACH, or failing that EDGE_REACH; whether it linked any.
+  fn reach_within(&mut self, to_end: bool, point: (f64, f64), extra: f64, escape: Option<(f64, f64)>, components: &mut Option<&mut Vec<u32>>) -> bool {
+    let (n, total) = (self.graph.nodes.len(), self.b.nodes.len());
+    let mut linked = self.reach(to_end, point, extra, escape, n, total, components);
+    let mut near = std::mem::take(&mut self.b.candidates);
+    for reach in [LINK_REACH, EDGE_REACH] {
+      self.graph.node_cells.near(point.0 - reach, point.1 - reach, point.0 + reach, point.1 + reach, &mut near);
+      for &node in &near { linked |= self.reach_node(to_end, point, extra, escape, node as usize, components); }
+      if linked { break; }
+    }
+    self.b.candidates = near;
+    linked
+  }
+
 
   fn heuristic(&self, node: usize) -> f64 {
     let (x, y) = self.position(node);
@@ -693,14 +739,15 @@ impl Query<'_> {
   // temporary nodes for any node.
   fn relax_near(&mut self, heap: &mut BinaryHeap<Entry>, node: usize, temporary: bool) {
     let (nx, ny) = self.position(node);
-    let candidates: Vec<usize> = if temporary {
-      (self.graph.nodes.len()..self.b.nodes.len()).collect()
+    let mut candidates = std::mem::take(&mut self.b.candidates);
+    if temporary {
+      candidates.clear();
+      candidates.extend(self.graph.nodes.len() as u32..self.b.nodes.len() as u32);
     } else {
-      let mut near = Vec::new();
-      self.graph.node_cells.near(nx - MOVING_REACH, ny - MOVING_REACH, nx + MOVING_REACH, ny + MOVING_REACH, &mut near);
-      near.into_iter().map(|node| node as usize).collect()
-    };
-    for next in candidates {
+      self.graph.node_cells.near(nx - MOVING_REACH, ny - MOVING_REACH, nx + MOVING_REACH, ny + MOVING_REACH, &mut candidates);
+    }
+    for &next in &candidates {
+      let next = next as usize;
       if next == node || self.b.closed[next] { continue; }
       let (x, y) = self.position(next);
       let cost = length(x - nx, y - ny);
@@ -708,6 +755,7 @@ impl Query<'_> {
       if !self.b.nodes.wraps(next, (nx, ny)) || !self.b.nodes.wraps(node, (x, y)) || !self.clear((x, y), (nx, ny)) { continue; }
       self.relax(heap, node, next, cost);
     }
+    self.b.candidates = candidates;
   }
 
   fn run(&mut self) -> Vec<f64> {
@@ -735,10 +783,10 @@ impl Query<'_> {
     }
     // start and end must see the same component past the walls: circles only take paths away (a point
     // that sees none of the graph's nodes, as on an open field, may still get around circles)
-    let (mut end_components, mut start_components) = (HashSet::new(), HashSet::new());
+    let (mut end_components, mut start_components) = (Vec::new(), Vec::new());
     let end_escapes = self.link(true, end, &mut end_components);
     let start_escapes = self.link(false, start, &mut start_components);
-    if !end_components.is_empty() && !start_components.is_empty() && start_components.is_disjoint(&end_components) { return Vec::new(); }
+    if !end_components.is_empty() && !start_components.is_empty() && !start_components.iter().any(|component| end_components.contains(component)) { return Vec::new(); }
 
     let mut heap = BinaryHeap::new();
     for node in 0..n { self.start_at(&mut heap, node); }

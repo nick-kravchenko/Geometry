@@ -57,6 +57,32 @@ function bucket(boxes: ArrayLike<number>, w: number, h: number, cellSize: number
   return { cellSize, columns, rows, offsets, indices };
 }
 
+// Calls visit for every item in the cells along the segment, in order from (x0, y0) (Amanatides–Woo),
+// until it returns true; an item may come up more than once.
+function along({ cellSize, columns, rows, offsets, indices }: Buckets, x0: number, y0: number, x1: number, y1: number, visit: (item: number) => boolean): void {
+  const dx: number = x1 - x0, dy: number = y1 - y0;
+  const cx0: number = (x0 + 1) / cellSize, cy0: number = (y0 + 1) / cellSize;
+  let column: number = Math.floor(cx0), row: number = Math.floor(cy0);
+  const endColumn: number = Math.floor((x1 + 1) / cellSize), endRow: number = Math.floor((y1 + 1) / cellSize);
+  const stepX: number = dx > 0 ? 1 : -1, stepY: number = dy > 0 ? 1 : -1;
+  const deltaX: number = dx === 0 ? Infinity : Math.abs(cellSize / dx), deltaY: number = dy === 0 ? Infinity : Math.abs(cellSize / dy);
+  let nextX: number = dx > 0 ? (column + 1 - cx0) * cellSize / dx : dx < 0 ? (column - cx0) * cellSize / dx : Infinity;
+  let nextY: number = dy > 0 ? (row + 1 - cy0) * cellSize / dy : dy < 0 ? (row - cy0) * cellSize / dy : Infinity;
+  for (let steps: number = Math.abs(endColumn - column) + Math.abs(endRow - row); steps >= 0; steps--) {
+    if (column >= 0 && row >= 0 && column < columns && row < rows) {
+      const c: number = row * columns + column;
+      for (let k: number = offsets[c]; k < offsets[c + 1]; k++) if (visit(indices[k])) return;
+    }
+    if (nextX < nextY) {
+      column += stepX;
+      nextX += deltaX;
+    } else {
+      row += stepY;
+      nextY += deltaY;
+    }
+  }
+}
+
 // Calls visit for every item in the cells overlapping the box; an item may come up more than once.
 function near({ cellSize, columns, rows, offsets, indices }: Buckets, minX: number, minY: number, maxX: number, maxY: number, visit: (item: number) => void): void {
   const cell = (v: number, count: number): number => Math.max(0, Math.min(count - 1, Math.floor((v + 1) / cellSize)));
@@ -207,6 +233,9 @@ const MOVING_REACH: number = 160;
 // the longest edge, and how far start and end look for nodes first: 200 m on Kyiv. Longer lines of sight
 // go through nodes on the way, at a small cost in length.
 const EDGE_REACH: number = 800;
+// how far start and end look for nodes first, then EDGE_REACH, then everywhere: 100 m on Kyiv. Linking
+// is most of a search's time, and nearer nodes are fewer.
+const LINK_REACH: number = 400;
 
 function bucketWalls(segments: number[], w: number, h: number): Walls {
   const columns: number = Math.ceil((w + 2) / WALL_CELL), rows: number = Math.ceil((h + 2) / WALL_CELL);
@@ -382,18 +411,20 @@ export function buildNavigationGraph(grid: Uint8Array, w: number, h: number, tol
   };
 }
 
-// The first circle the segment cuts into, or -1. Circles are bucketed by their bounding boxes.
+// A circle the segment cuts into, or -1. Circles are bucketed by their bounding boxes; the cells along
+// the segment are walked from its start.
 function blockingCircle(circles: Circle[], cells: Buckets, seen: Int32Array, test: number, x0: number, y0: number, x1: number, y1: number): number {
   const dx: number = x1 - x0, dy: number = y1 - y0;
   const lengthSquared: number = dx * dx + dy * dy;
   let blocking: number = -1;
-  near(cells, Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1), (circle: number) => {
-    if (blocking !== -1 || seen[circle] === test) return;
+  along(cells, x0, y0, x1, y1, (circle: number) => {
+    if (seen[circle] === test) return false;
     seen[circle] = test;
     const [[cx, cy], radius] = circles[circle];
     const t: number = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((cx - x0) * dx + (cy - y0) * dy) / lengthSquared));
     const ex: number = x0 + t * dx - cx, ey: number = y0 + t * dy - cy;
     if (ex * ex + ey * ey < radius * radius) blocking = circle;
+    return blocking !== -1;
   });
   return blocking;
 }
@@ -500,11 +531,24 @@ export function navigationGraphSearch(
   };
   // the same for the graph's nodes within MOVING_REACH and the temporary ones: for the many escape
   // points around a point stuck in a corner
-  const reachNear = (cost: Float64Array, via: (Point | null)[], ex: number, ey: number, extra: number, escape: Point): void => {
+  const reachNear = (cost: Float64Array, via: (Point | null)[], ex: number, ey: number, extra: number, escape: Point): boolean => {
+    let linked: boolean = false;
     near(nodeCells, ex - MOVING_REACH, ey - MOVING_REACH, ex + MOVING_REACH, ey + MOVING_REACH, (node: number) => {
-      reachNode(cost, via, ex, ey, extra, escape, node);
+      linked = reachNode(cost, via, ex, ey, extra, escape, node) || linked;
     });
-    reach(cost, via, ex, ey, extra, escape, n, total);
+    return reach(cost, via, ex, ey, extra, escape, n, total) || linked;
+  };
+  // Links the point, reached through escape extra pixels away if given, to the temporary nodes and the
+  // graph's nodes within LINK_REACH, or failing that EDGE_REACH; whether it linked any.
+  const reachWithin = (cost: Float64Array, via: (Point | null)[], ex: number, ey: number, extra: number, escape: Point | null): boolean => {
+    let linked: boolean = reach(cost, via, ex, ey, extra, escape, n, total);
+    for (const radius of [LINK_REACH, EDGE_REACH]) {
+      near(nodeCells, ex - radius, ey - radius, ex + radius, ey + radius, (node: number) => {
+        linked = reachNode(cost, via, ex, ey, extra, escape, node) || linked;
+      });
+      if (linked) break;
+    }
+    return linked;
   };
   // A point a few pixels off the outline nearest to (px, py), or null: pushed away from it twice, in
   // case the first push lands within another outline, as in a corner.
@@ -543,24 +587,22 @@ export function navigationGraphSearch(
   };
   const linkThrough = (px: number, py: number, cost: Float64Array, via: (Point | null)[]): Point[] => {
     // nodes within EDGE_REACH, then all of them if none of those
-    let linked: boolean = false;
-    near(nodeCells, px - EDGE_REACH, py - EDGE_REACH, px + EDGE_REACH, py + EDGE_REACH, (node: number) => {
-      linked = reachNode(cost, via, px, py, 0, null, node) || linked;
-    });
-    if (reach(cost, via, px, py, 0, null, n, total) || linked || reach(cost, via, px, py, 0, null, 0, n)) return [];
+    if (reachWithin(cost, via, px, py, 0, null)) return [];
     const pushed: Point | null = pushOff(px, py);
-    if (pushed && reach(cost, via, pushed[0], pushed[1], Math.hypot(pushed[0] - px, pushed[1] - py), pushed, 0, total)) return [pushed];
+    if (pushed && reachWithin(cost, via, pushed[0], pushed[1], Math.hypot(pushed[0] - px, pushed[1] - py), pushed)) return [pushed];
     const escapes: Point[] = [];
+    let linked: boolean = false;
     for (const radius of [2, 4, 8]) {
       for (let k: number = 0; k < 16; k++) {
         const ex: number = px + radius * Math.cos(k * Math.PI / 8), ey: number = py + radius * Math.sin(k * Math.PI / 8);
         if (!isSegmentClear(grid, w, h, px, py, ex, ey) || inCircle(ex, ey)) continue;
         if (circles.length > 0 && blockingCircle(circles, circleCells, seen, ++test, px, py, ex, ey) !== -1) continue;
         escapes.push([ex, ey]);
-        reachNear(cost, via, ex, ey, radius, [ex, ey]);
+        linked = reachNear(cost, via, ex, ey, radius, [ex, ey]) || linked;
       }
-      if (via.some((escape: Point | null) => escape !== null)) break;
+      if (linked) break;
     }
+    if (!linked) reach(cost, via, px, py, 0, null, 0, n); // last: every node, seen from the point itself
     return escapes;
   };
   // start and end must see the same component past the walls: circles only take paths away
