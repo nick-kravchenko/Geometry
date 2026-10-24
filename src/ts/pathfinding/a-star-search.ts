@@ -1,4 +1,6 @@
 const UNSET: number = 0xFFFFFFFF;
+// move priorities, lower wins between equally short paths
+const HORIZONTAL: number = 0, VERTICAL: number = 1, DIAGONAL: number = 2;
 
 export function AStarSearch(
   blockedCellsNumbers: Uint8Array,
@@ -22,7 +24,8 @@ export function AStarSearch(
                            + (gridSize << 2) // parents (32bit array)
                            + (gridSize << 2) // gScoreArray (32bit array)
                            + (gridSize << 2) // fScoreArray (32bit array)
-                           + (gridSize << 0); // cells (8bit array)
+                           + (gridSize << 0) // cells (8bit array)
+                           + (gridSize << 0); // moves (8bit array)
   let bufferOffset: number = 0;
   const buffer: ArrayBuffer = new ArrayBuffer(bufferSize);
   // heap - binary min-heap of open cells ordered by fScore
@@ -45,6 +48,9 @@ export function AStarSearch(
   // cells - blocked - 1, free - 0, closed - 0x80
   const cells: Uint8Array = new Uint8Array(buffer, bufferOffset, gridSize);
         cells.set(blockedCellsNumbers);
+        bufferOffset += gridSize;
+  // moves - priority of the move that reached the cell from its parent
+  const moves: Uint8Array = new Uint8Array(buffer, bufferOffset, gridSize);
 
   const endX: number = end % w;
   const endY: number = ~~(end / w);
@@ -102,11 +108,17 @@ export function AStarSearch(
     return top;
   }
 
-  function relax(neighbor: number, currentCell: number, tentativeGScore: number): void {
+  // all paths of equal length are optimal; between them always prefer the horizontal move,
+  // otherwise ties are resolved arbitrarily and the path zigzags like a staircase
+  function relax(neighbor: number, currentCell: number, tentativeGScore: number, move: number): void {
     if (cells[neighbor] !== 0) return; // blocked or closed
-    if (tentativeGScore >= gScoreArray[neighbor]) return;
+    if (
+      tentativeGScore > gScoreArray[neighbor]
+      || (tentativeGScore === gScoreArray[neighbor] && move >= moves[neighbor])
+    ) return;
     gScoreArray[neighbor] = tentativeGScore;
     fScoreArray[neighbor] = tentativeGScore + heuristic(neighbor);
+    moves[neighbor] = move;
     parents[neighbor] = currentCell;
     if (heapIndex[neighbor] === -1) {
       heap[heapSize] = neighbor;
@@ -147,10 +159,10 @@ export function AStarSearch(
 
     const tentativeGScore: number = gScoreArray[currentCell] + 1;
 
-    if (canMoveLeft) relax(left, currentCell, tentativeGScore);
-    if (canMoveRight) relax(right, currentCell, tentativeGScore);
-    if (canMoveUp) relax(top, currentCell, tentativeGScore);
-    if (canMoveDown) relax(bottom, currentCell, tentativeGScore);
+    if (canMoveLeft) relax(left, currentCell, tentativeGScore, HORIZONTAL);
+    if (canMoveRight) relax(right, currentCell, tentativeGScore, HORIZONTAL);
+    if (canMoveUp) relax(top, currentCell, tentativeGScore, VERTICAL);
+    if (canMoveDown) relax(bottom, currentCell, tentativeGScore, VERTICAL);
 
     if (diagonal) {
       // diagonal moves require both orthogonal neighbors to be free (no corner cutting)
@@ -158,10 +170,10 @@ export function AStarSearch(
       const rightFree: boolean = canMoveRight && (cells[right] & 1) === 0;
       const topFree: boolean = canMoveUp && (cells[top] & 1) === 0;
       const bottomFree: boolean = canMoveDown && (cells[bottom] & 1) === 0;
-      if (topFree && leftFree) relax(top - 1, currentCell, tentativeGScore); // top-left
-      if (topFree && rightFree) relax(top + 1, currentCell, tentativeGScore); // top-right
-      if (bottomFree && leftFree) relax(bottom - 1, currentCell, tentativeGScore); // bottom-left
-      if (bottomFree && rightFree) relax(bottom + 1, currentCell, tentativeGScore); // bottom-right
+      if (topFree && leftFree) relax(top - 1, currentCell, tentativeGScore, DIAGONAL);
+      if (topFree && rightFree) relax(top + 1, currentCell, tentativeGScore, DIAGONAL);
+      if (bottomFree && leftFree) relax(bottom - 1, currentCell, tentativeGScore, DIAGONAL);
+      if (bottomFree && rightFree) relax(bottom + 1, currentCell, tentativeGScore, DIAGONAL);
     }
   }
 

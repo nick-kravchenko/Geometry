@@ -12,7 +12,7 @@ Renders a fixed 972×972 canvas with an 18×18 grid of hand-placed obstacles. Pa
 - **[TS] BFS** — TypeScript breadth-first search (4-directional)
 - **[TS] A\*** — TypeScript A* search with optional diagonal movement
 
-Each algorithm is timed once in the browser console (`console.time`) so you can compare TS vs WASM performance directly.
+Each algorithm is timed once (`performance.now`); timings are shown in the legend and logged to the console so you can compare TS vs WASM performance directly.
 
 ## Stack
 

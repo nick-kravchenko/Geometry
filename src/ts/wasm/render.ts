@@ -16,6 +16,7 @@ export function render(
   pathBFSWASM: ArrayLike<number>,
   pathBFSTS: number[],
   pathAStarTS: number[],
+  timings: number[],
   cellWidth: number,
   cellHeight: number,
   cellsY: number,
@@ -63,18 +64,24 @@ export function render(
   ctx.fill();
   ctx.stroke();
 
-  renderLegend(ctx, cellHeight * .3);
+  renderLegend(ctx, cellHeight * .3, timings);
 }
 
-function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number): void {
+function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number, timings: number[]): void {
   ctx.font = `300 ${fontSize}px/${fontSize}px "JetBrains Mono", sans-serif`;
-  ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
+  const labelX: number = fontSize * 2.5;
+  // right-align timings in a column after the widest label
+  const timingX: number = labelX + Math.max(...PATHS.map(({ label }) => ctx.measureText(label).width))
+    + ctx.measureText(' 000.0 ms').width;
   PATHS.forEach(({ label, color }, i: number) => {
     const y: number = fontSize * (1 + i * 1.5);
     ctx.fillStyle = color;
     ctx.fillRect(fontSize, y - fontSize * .25, fontSize, fontSize * .5);
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, fontSize * 2.5, y);
+    ctx.textAlign = 'left';
+    ctx.fillText(label, labelX, y);
+    ctx.textAlign = 'right';
+    ctx.fillText(`${timings[i].toFixed(1)} ms`, timingX, y);
   });
 }

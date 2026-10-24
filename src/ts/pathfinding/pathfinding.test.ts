@@ -57,6 +57,43 @@ describe.each(searches)('%s', (_name: string, search: Search) => {
   });
 });
 
+describe('AStarSearch path shape', () => {
+  // a staircase shows up as runs of a single step between two turns
+  function countSingleStepRuns(path: number[]): number {
+    let runs: number = 0;
+    for (let i: number = 3; i < path.length; i++) {
+      const before: number = path[i - 2] - path[i - 3];
+      const step: number = path[i - 1] - path[i - 2];
+      const after: number = path[i] - path[i - 1];
+      if (step !== before && step !== after) runs++;
+    }
+    return runs;
+  }
+
+  it('does not zigzag between equally short paths', () => {
+    // demo obstacle layout scaled down to 12px cells; ties between equally short paths used to give a staircase
+    const cell: number = 12, w: number = 18 * cell, padding: number = cell / 4;
+    const squares: [number, number][] = [
+      [4, 4], [5, 3], [3, 5], [3, 6], [3, 7], [3, 8], [3, 9], [3, 10], [4, 11], [5, 12], [6, 13], [7, 13],
+      [8, 13], [9, 13], [10, 13], [11, 12], [12, 11], [13, 6], [13, 7], [13, 8], [13, 9], [13, 10], [12, 5],
+      [7, 4], [8, 4], [9, 4], [10, 4], [11, 4], [6, 5], [5, 6], [5, 7], [5, 8], [5, 9], [6, 10], [7, 11],
+      [8, 11], [9, 11], [11, 7], [11, 8], [11, 9], [10, 10], [8, 6], [9, 6], [10, 6], [7, 7], [7, 8], [8, 9], [9, 8],
+    ];
+    const grid: Uint8Array = new Uint8Array(w * w);
+    for (const [cx, cy] of squares) {
+      for (let y: number = cy * cell - padding; y < (cy + 1) * cell + padding; y++) {
+        grid.fill(1, y * w + cx * cell - padding, y * w + (cx + 1) * cell + padding);
+      }
+    }
+    const start: number = (8 * cell + cell / 2) * (w + 1);
+    const end: number = (13 * cell + cell / 2) * w + 11 * cell + cell / 2;
+    const bfs: number[] = breadthFirstSearch(grid, w, w, start, end);
+    const aStar: number[] = AStarSearch(grid, w, w, start, end, false);
+    expect(aStar.length).toBe(bfs.length);
+    expect(countSingleStepRuns(aStar)).toBe(0);
+  });
+});
+
 describe('random grids', () => {
   it('every search returns a valid shortest path', () => {
     const rand: () => number = random(42);
