@@ -12,7 +12,7 @@ Renders a 972×972 canvas, centered and scaled to fit the screen, with one of se
 - **[WASM] A\*** / **[TS] A\*** — A* search
 - **[WASM] JPS** / **[TS] JPS** — jump point search
 - **[WASM] Visibility graph** / **[TS] Visibility graph** — shortest any-angle path around obstacle corners
-- **[TS] Circle visibility graph** — shortest any-angle path around round obstacles, from the circles themselves (circle maps only)
+- **[WASM] Circle visibility graph** / **[TS] Circle visibility graph** — shortest any-angle path around round obstacles, from the circles themselves (circle maps only)
 
 All UI is drawn on the canvas:
 
@@ -49,6 +49,7 @@ src/
       a_star_search.rs          # A* (port of the TS version)
       jump_point_search.rs      # JPS (port of the TS version)
       visibility_graph_search.rs # Visibility graph (port of the TS version)
+      circle_visibility_graph_search.rs # Circle visibility graph (port of the TS version)
   lib.rs                        # WASM exports: Pathfinder, wasm_memory, wasm_breadth_first_search
   ts/
     geometry/
@@ -188,11 +189,11 @@ Shortest path at any angle around disjoint circles, working on the circles rathe
 circleVisibilityGraphSearch(circles, start, end, maxStep?): Point[]
 ```
 
-On the demo's circle maps it takes about 1 ms (Asteroids, 26 circles) and 11 ms (Pillars, 75 circles) against 375 ms and 1 s for the pixel visibility graph on the same obstacles rasterized.
+On the demo's circle maps it takes about 1 ms (Asteroids, 26 circles) and 11 ms (Pillars, 75 circles) in TS, 0.4 ms and 3.7 ms in WASM, against 375 ms and 1 s for the pixel visibility graph on the same obstacles rasterized.
 
 ### WASM — Rust (`Pathfinder`)
 
-BFS, A*, JPS and the visibility graph compiled to WASM, finding the same paths as their TS versions. The grid lives in WASM memory: write obstacles straight into it instead of passing a grid from JS on every call, and each algorithm keeps its buffers between searches, so repeated searches allocate nothing new. Suited to searching every frame while obstacles move.
+BFS, A*, JPS, the visibility graph and the circle visibility graph compiled to WASM, finding the same paths as their TS versions (the circle visibility graph to within floating-point precision, as JS and Rust trigonometry may differ in the last bit). The grid lives in WASM memory: write obstacles straight into it instead of passing a grid from JS on every call, and each algorithm keeps its buffers between searches, so repeated searches allocate nothing new. Suited to searching every frame while obstacles move.
 
 ```ts
 const pathfinder = new Pathfinder(w, h);
@@ -202,6 +203,8 @@ pathfinder.breadth_first_search(start, end, diagonal): Uint32Array
 pathfinder.a_star_search(start, end, diagonal): Uint32Array
 pathfinder.jump_point_search(start, end, diagonal): Uint32Array
 pathfinder.visibility_graph_search(start, end): Float64Array // waypoints [x0, y0, x1, y1, ...]
+pathfinder.circle_visibility_graph_search(circles, startX, startY, endX, endY, maxStep): Float64Array
+// circles as [x, y, radius, ...]; independent of the grid
 pathfinder.set_cells(blockedCells) // alternative: copy a whole grid in
 ```
 

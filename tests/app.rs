@@ -173,3 +173,35 @@ fn pathfinder_visibility_graph_reaches_end_like_diagonal_bfs_and_beats_grid_path
         }
     }
 }
+
+#[test]
+fn pathfinder_circle_visibility_graph_stays_out_of_circles() {
+    let mut pathfinder = Pathfinder::new(1, 1);
+    let mut random = Random(0x1B873593);
+    for _ in 0..300 {
+        let size = 200.0;
+        let (start, end) = ((random.next() * size, random.next() * size), (random.next() * size, random.next() * size));
+        // disjoint circles that leave start and end free
+        let mut circles: Vec<(f64, f64, f64)> = Vec::new();
+        for _ in 0..300 {
+            let radius = 4.0 + random.next() * 16.0;
+            let (x, y) = (radius + random.next() * (size - 2.0 * radius), radius + random.next() * (size - 2.0 * radius));
+            let apart = circles.iter().all(|&(cx, cy, r)| (x - cx).hypot(y - cy) > radius + r + 2.0);
+            let clear = [start, end].iter().all(|&(px, py)| (x - px).hypot(y - py) > radius + 1.0);
+            if apart && clear && circles.len() < 12 { circles.push((x, y, radius)); }
+        }
+        let flat: Vec<f64> = circles.iter().flat_map(|&(x, y, r)| [x, y, r]).collect();
+        let path = pathfinder.circle_visibility_graph_search(&flat, start.0, start.1, end.0, end.1, 1.0);
+        assert_eq!((path[0], path[1]), start);
+        assert_eq!((path[path.len() - 2], path[path.len() - 1]), end);
+        for (a, b) in path.chunks(2).zip(path.chunks(2).skip(1)) {
+            for &(cx, cy, radius) in &circles {
+                // distance from the center to the segment; flattened arcs cut in by at most step² / (8 · radius)
+                let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                let t = (((cx - a[0]) * dx + (cy - a[1]) * dy) / (dx * dx + dy * dy).max(1e-12)).clamp(0.0, 1.0);
+                let distance = (a[0] + t * dx - cx).hypot(a[1] + t * dy - cy);
+                assert!(distance > radius - 1.0 / (8.0 * radius) - 1e-9, "{distance} < {radius}");
+            }
+        }
+    }
+}

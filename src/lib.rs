@@ -2,6 +2,7 @@ use wasm_bindgen::prelude::*;
 mod rust;
 use crate::rust::pathfinding::a_star_search::AStarSearch;
 use crate::rust::pathfinding::breadth_first_search::{breadth_first_search, BreadthFirstSearch};
+use crate::rust::pathfinding::circle_visibility_graph_search::{Circle, CircleVisibilityGraphSearch};
 use crate::rust::pathfinding::jump_point_search::JumpPointSearch;
 use crate::rust::pathfinding::visibility_graph_search::VisibilityGraphSearch;
 
@@ -45,6 +46,7 @@ pub struct Pathfinder {
     a_star: Option<AStarSearch>,
     jump_point: Option<JumpPointSearch>,
     visibility_graph: Option<VisibilityGraphSearch>,
+    circle_visibility_graph: CircleVisibilityGraphSearch,
 }
 
 #[wasm_bindgen]
@@ -52,7 +54,7 @@ impl Pathfinder {
     #[wasm_bindgen(constructor)]
     pub fn new(w: u32, h: u32) -> Pathfinder {
         let (w, h) = (w as usize, h as usize);
-        Pathfinder { cells: vec![0; w * h], w, h, breadth_first: None, a_star: None, jump_point: None, visibility_graph: None }
+        Pathfinder { cells: vec![0; w * h], w, h, breadth_first: None, a_star: None, jump_point: None, visibility_graph: None, circle_visibility_graph: CircleVisibilityGraphSearch::new() }
     }
 
     pub fn cells_ptr(&self) -> *const u8 {
@@ -85,5 +87,20 @@ impl Pathfinder {
     pub fn visibility_graph_search(&mut self, start: u32, end: u32) -> Vec<f64> {
         let (w, h) = (self.w, self.h);
         self.visibility_graph.get_or_insert_with(|| VisibilityGraphSearch::new(w, h)).search(&self.cells, start, end)
+    }
+
+    // Shortest path around round obstacles, independent of the grid: circles as [x, y, radius, ...]
+    // in pixels, returns the path as [x0, y0, x1, y1, ...]; see CircleVisibilityGraphSearch.
+    pub fn circle_visibility_graph_search(
+        &mut self,
+        circles: &[f64],
+        start_x: f64,
+        start_y: f64,
+        end_x: f64,
+        end_y: f64,
+        max_step: f64,
+    ) -> Vec<f64> {
+        let circles: Vec<Circle> = circles.chunks_exact(3).map(|c| (c[0], c[1], c[2])).collect();
+        self.circle_visibility_graph.search(&circles, (start_x, start_y), (end_x, end_y), max_step)
     }
 }

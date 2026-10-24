@@ -139,6 +139,11 @@ function start(module: typeof import('pkg')): void {
     ['[TS] Visibility graph', COLORS.visibilityGraph, 2, (end: number): SearchResult => ({
       points: visibilityGraphSearch(grid, w, h, from, end),
     }), pixelVisibilityGraph],
+    ['[WASM] Circle visibility graph', wasmPathColor(COLORS.visibilityGraph), 6, (): SearchResult => {
+      const [startX, startY] = field.startPointCoordinates, [endX, endY] = endCoordinates;
+      const circles: Float64Array = new Float64Array(paddedCircles().flatMap(([[x, y], radius]: Circle) => [x, y, radius]));
+      return { points: toPoints(pathfinder.circle_visibility_graph_search(circles, startX, startY, endX, endY, 4)) };
+    }, circleVisibilityGraph],
     ['[TS] Circle visibility graph', COLORS.visibilityGraph, 2, (): SearchResult => ({
       points: circleVisibilityGraphSearch(paddedCircles(), field.startPointCoordinates, endCoordinates),
     }), circleVisibilityGraph],
