@@ -33,7 +33,29 @@ function isClear(circles: Circle[], x0: number, y0: number, x1: number, y1: numb
   return true;
 }
 
-// Builds the graph for paths from start to end around disjoint circles. Nodes 0 and 1 are start and end.
+// Angles on each circle where another circle crosses it; an arc past one of them would run through
+// that circle.
+function crossings(circles: Circle[]): number[][] {
+  const angles: number[][] = circles.map(() => []);
+  for (let i: number = 0; i < circles.length; i++) {
+    const [[x1, y1], r1] = circles[i];
+    for (let j: number = i + 1; j < circles.length; j++) {
+      const [[x2, y2], r2] = circles[j];
+      const distance: number = Math.hypot(x2 - x1, y2 - y1);
+      if (distance >= r1 + r2 || distance <= Math.abs(r1 - r2)) continue; // apart, or one inside the other
+      const direction: number = Math.atan2(y2 - y1, x2 - x1);
+      // law of cosines: the angle at each center between the line of centers and the crossing points
+      const spread1: number = Math.acos((r1 * r1 + distance * distance - r2 * r2) / (2 * r1 * distance));
+      const spread2: number = Math.acos((r2 * r2 + distance * distance - r1 * r1) / (2 * r2 * distance));
+      angles[i].push(direction + spread1, direction - spread1);
+      angles[j].push(direction + Math.PI + spread2, direction + Math.PI - spread2);
+    }
+  }
+  return angles;
+}
+
+// Builds the graph for paths from start to end around circles, which may overlap. Nodes 0 and 1 are
+// start and end.
 export function buildCircleGraph(circles: Circle[], start: Point, end: Point): CircleGraph {
   const graph: CircleGraph = { x: [], y: [], circle: [], angle: [], edges: [], segments: [] };
   const addNode = (x: number, y: number, circle: number, angle: number): number => {
@@ -105,24 +127,27 @@ export function buildCircleGraph(circles: Circle[], start: Point, end: Point): C
     }
   }
 
-  // along each circle: arcs between neighbouring tangent points, counterclockwise one way, clockwise back
+  // along each circle: arcs between neighbouring tangent points, counterclockwise one way, clockwise back,
+  // unless another circle overlaps the arc; tangent points inside other circles were never added
   const onCircle: number[][] = circles.map(() => []);
   for (let node: number = 2; node < graph.x.length; node++) onCircle[graph.circle[node]].push(node);
+  const cuts: number[][] = crossings(circles);
+  const normalized = (angle: number): number => ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
   onCircle.forEach((nodes: number[], i: number) => {
     if (nodes.length < 2) return;
     const radius: number = circles[i][1];
-    const normalized = (angle: number): number => ((angle % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
     nodes.sort((a: number, b: number) => normalized(graph.angle[a]) - normalized(graph.angle[b]));
     for (let k: number = 0; k < nodes.length; k++) {
       const a: number = nodes[k], b: number = nodes[(k + 1) % nodes.length];
       const sweep: number = normalized(graph.angle[b] - graph.angle[a]);
+      if (cuts[i].some((cut: number) => normalized(cut - graph.angle[a]) < sweep)) continue;
       connect(a, b, radius * sweep, 1);
     }
   });
   return graph;
 }
 
-// Shortest path from start to end around disjoint circles (obstacles), at any angle: straight tangent
+// Shortest path from start to end around circles (obstacles, which may overlap), at any angle: straight tangent
 // segments joined by arcs along circles. Built from scratch on every call, so circles may move between
 // calls. Returns the path as a polyline, with arcs flattened into segments no longer than maxStep.
 export function circleVisibilityGraphSearch(circles: Circle[], start: Point, end: Point, maxStep: number = 4): Point[] {

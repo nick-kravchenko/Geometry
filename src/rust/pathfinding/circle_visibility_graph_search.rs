@@ -9,9 +9,10 @@ const NONE: usize = usize::MAX;
 pub type Circle = (f64, f64, f64);
 
 // Reusable buffers for repeated searches. Port of the TypeScript circleVisibilityGraphSearch: shortest
-// path at any angle around disjoint circles. Nodes are tangent points (from start and end to each circle,
+// path at any angle around circles, which may overlap. Nodes are tangent points (from start and end to each circle,
 // and the bitangents between every two circles); edges are tangent segments that miss every other circle,
-// and arcs between neighbouring tangent points along a circle. Nodes 0 and 1 are start and end.
+// and arcs between neighbouring tangent points along a circle that no other circle overlaps. Nodes 0 and
+// 1 are start and end.
 #[derive(Default)]
 pub struct CircleVisibilityGraphSearch {
   x: Vec<f64>,
@@ -20,6 +21,7 @@ pub struct CircleVisibilityGraphSearch {
   angle: Vec<f64>,
   // per node: (neighbor, cost, arc direction: 0 - segment, 1 - counterclockwise, -1 - clockwise)
   edges: Vec<Vec<(usize, f64, i8)>>,
+  crossings: Vec<Vec<f64>>, // per circle: angles where another circle crosses it
   distances: Vec<f64>,
   parents: Vec<usize>,
   arcs: Vec<i8>,
@@ -57,6 +59,27 @@ fn is_clear(circles: &[Circle], x0: f64, y0: f64, x1: f64, y1: f64, skip_a: usiz
     if px * px + py * py < radius * radius - EPSILON { return false; }
   }
   true
+}
+
+// Angles on each circle where another circle crosses it; an arc past one of them would run through
+// that circle.
+fn find_crossings(circles: &[Circle], angles: &mut Vec<Vec<f64>>) {
+  for list in angles.iter_mut() { list.clear(); }
+  angles.resize(circles.len().max(angles.len()), Vec::new());
+  for i in 0..circles.len() {
+    let (x1, y1, r1) = circles[i];
+    for j in i + 1..circles.len() {
+      let (x2, y2, r2) = circles[j];
+      let distance = (x2 - x1).hypot(y2 - y1);
+      if distance >= r1 + r2 || distance <= (r1 - r2).abs() { continue; } // apart, or one inside the other
+      let direction = (y2 - y1).atan2(x2 - x1);
+      // law of cosines: the angle at each center between the line of centers and the crossing points
+      let spread1 = ((r1 * r1 + distance * distance - r2 * r2) / (2.0 * r1 * distance)).acos();
+      let spread2 = ((r2 * r2 + distance * distance - r1 * r1) / (2.0 * r2 * distance)).acos();
+      angles[i].extend([direction + spread1, direction - spread1]);
+      angles[j].extend([direction + PI + spread2, direction + PI - spread2]);
+    }
+  }
 }
 
 impl CircleVisibilityGraphSearch {
@@ -149,7 +172,10 @@ impl CircleVisibilityGraphSearch {
       }
     }
 
-    // along each circle: arcs between neighbouring tangent points, counterclockwise one way, clockwise back
+    // along each circle: arcs between neighbouring tangent points, counterclockwise one way, clockwise back,
+    // unless another circle overlaps the arc; tangent points inside other circles were never added
+    let mut crossings = std::mem::take(&mut self.crossings);
+    find_crossings(circles, &mut crossings);
     let mut on_circle: Vec<Vec<usize>> = vec![Vec::new(); circles.len()];
     for node in 2..self.x.len() { on_circle[self.circle[node]].push(node); }
     for (i, mut nodes) in on_circle.into_iter().enumerate() {
@@ -159,12 +185,14 @@ impl CircleVisibilityGraphSearch {
       for k in 0..nodes.len() {
         let (a, b) = (nodes[k], nodes[(k + 1) % nodes.len()]);
         let sweep = normalized(self.angle[b] - self.angle[a]);
+        if crossings[i].iter().any(|&cut| normalized(cut - self.angle[a]) < sweep) { continue; }
         self.connect(a, b, radius * sweep, 1);
       }
     }
+    self.crossings = crossings;
   }
 
-  // Shortest path from start to end around disjoint circles, as a polyline [x0, y0, x1, y1, ...] with
+  // Shortest path from start to end around circles, which may overlap, as a polyline [x0, y0, x1, y1, ...] with
   // arcs flattened into segments no longer than max_step. Built from scratch on every call.
   pub fn search(&mut self, circles: &[Circle], start: (f64, f64), end: (f64, f64), max_step: f64) -> Vec<f64> {
     let inside = |(x, y): (f64, f64)| circles.iter().any(|&(cx, cy, radius)| (x - cx).hypot(y - cy) < radius);
@@ -257,6 +285,31 @@ mod tests {
     let expected = 2.0 * 75f64.sqrt() + 5.0 * std::f64::consts::PI / 3.0;
     assert!((length(&path) - expected).abs() < 1e-3, "{} != {expected}", length(&path));
     for point in path.chunks(2) { assert!(point[0].hypot(point[1]) >= 5.0 - 1e-9); }
+  }
+
+  #[test]
+  fn goes_around_two_overlapping_circles() {
+    // the same case as the TS test: tangent, arc to the top, the 8 px outer tangent, mirrored down
+    let path = search(&[(-4.0, 0.0, 5.0), (4.0, 0.0, 5.0)], (-20.0, 0.0), (20.0, 0.0), 0.01);
+    let expected = 2.0 * 231f64.sqrt() + 10.0 * (std::f64::consts::FRAC_PI_2 - (5.0f64 / 16.0).acos()) + 8.0;
+    assert!((length(&path) - expected).abs() < 1e-3, "{} != {expected}", length(&path));
+  }
+
+  #[test]
+  fn does_not_follow_an_arc_through_a_circle_that_overlaps_it() {
+    // a small circle bulging out of a big one's right side: hugging the big one would cut through it
+    let path = search(&[(0.0, 0.0, 20.0), (20.0, 0.0, 5.0)], (5.0, 25.0), (5.0, -25.0), 1.0);
+    assert!(path.len() > 4);
+    for point in path.chunks(2) { assert!((point[0] - 20.0).hypot(point[1]) > 5.0 - 0.1, "{point:?}"); }
+  }
+
+  #[test]
+  fn finds_no_path_out_of_a_ring_of_overlapping_circles() {
+    let ring: Vec<Circle> = (0..12).map(|k| {
+      let angle = k as f64 * std::f64::consts::PI / 6.0;
+      (20.0 * angle.cos(), 20.0 * angle.sin(), 6.0)
+    }).collect();
+    assert!(search(&ring, (-50.0, 0.0), (0.0, 0.0), 4.0).is_empty());
   }
 
   #[test]

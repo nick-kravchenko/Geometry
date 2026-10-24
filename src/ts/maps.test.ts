@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { buildField, Field } from './get-data';
 import { CellMap, isConnected, MAPS } from './maps';
-import { breadthFirstSearch } from './pathfinding';
+import { Circle } from './geometry';
+import { breadthFirstSearch, circleVisibilityGraphSearch } from './pathfinding';
 
 describe.each(MAPS)('$name map', ({ generate, procedural }) => {
   const seeds: number[] = procedural ? [1, 2, 3, 42, 1234567] : [1];
@@ -18,6 +19,14 @@ describe.each(MAPS)('$name map', ({ generate, procedural }) => {
     expect(field.blockedCellsUint8Array[field.endPointNumber]).toBe(0);
     expect(breadthFirstSearch(field.blockedCellsUint8Array, 972, 972, field.startPointNumber, field.endPointNumber).length).toBeGreaterThan(0);
   });
+
+  if (generate(1).circles) {
+    it.each(seeds)('has a circle visibility graph path around its padded circles with seed %i', (seed: number) => {
+      const field: Field = buildField(generate(seed), 972, 972);
+      const padded: Circle[] = field.circles.map(([center, radius]: Circle): Circle => [center, radius + field.padding]);
+      expect(circleVisibilityGraphSearch(padded, field.startPointCoordinates, field.endPointCoordinates).length).toBeGreaterThan(1);
+    });
+  }
 
   it('gives the same layout for the same seed', () => {
     expect(generate(7)).toEqual(generate(7));

@@ -259,6 +259,35 @@ function asteroids(seed: number): CellMap {
   return { cellsX: size, cellsY: size, blocked: new Uint8Array(size * size), circles, start, end };
 }
 
+// Blobs of two to four overlapping circles. Like asteroids, but the gap is kept between the blobs'
+// bounding circles, so circles overlap only within a blob.
+function blobs(seed: number): CellMap {
+  const rand: () => number = random(seed);
+  const size: number = 36, gap: number = 1.5;
+  const start: [number, number] = [2, 2], end: [number, number] = [size - 3, size - 3];
+  const bounds: Circle[] = [];
+  const circles: Circle[] = [];
+  for (let attempt = 0; attempt < 3000 && bounds.length < 14; attempt++) {
+    const reach: number = 2 + rand() * 3;
+    const margin: number = reach + gap;
+    const center: Point = [margin + rand() * (size - 2 * margin), margin + rand() * (size - 2 * margin)];
+    const fits: boolean = bounds.every((bound: Circle) => pointToCircleDistance(center, bound) >= reach + gap)
+      && pointToCircleDistance(cellCenter(start), [center, reach]) >= gap
+      && pointToCircleDistance(cellCenter(end), [center, reach]) >= gap;
+    if (!fits) continue;
+    bounds.push([center, reach]);
+    // one circle at the center, the others pushed out to the bounding circle's edge so they bulge
+    const core: number = reach * (.45 + rand() * .2);
+    circles.push([center, core]);
+    for (let k = 0, count = 1 + ~~(rand() * 3); k < count; k++) {
+      const radius: number = reach * (.3 + rand() * .2);
+      const angle: number = rand() * 2 * Math.PI;
+      circles.push([[center[0] + (reach - radius) * Math.cos(angle), center[1] + (reach - radius) * Math.sin(angle)], radius]);
+    }
+  }
+  return { cellsX: size, cellsY: size, blocked: new Uint8Array(size * size), circles, start, end };
+}
+
 // A staggered grid of round pillars; every other row is shifted by half the spacing.
 function pillars(): CellMap {
   const size: number = 36, spacing: number = 4, radius: number = 1.1;
@@ -282,6 +311,7 @@ export const MAPS: MapDefinition[] = [
   { name: 'Cave', procedural: true, generate: connected(cave) },
   { name: 'Asteroids', procedural: true, generate: asteroids },
   { name: 'Pillars', procedural: false, generate: pillars },
+  { name: 'Blobs', procedural: true, generate: blobs },
 ];
 
 export const DEFAULT_SEED: number = 1;
