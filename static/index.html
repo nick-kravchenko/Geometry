@@ -9,14 +9,27 @@
       * {
         box-sizing: border-box;
       }
-      body {
+      html, body {
+        height: 100%;
         margin: 0;
         padding: 0;
         overflow: hidden;
+        background: #000a0e; /* just darker than the field (Ocean Sunset's #001219), so the canvas edge shows */
       }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      /* square, as large as fits: wide screens are limited by height, narrow ones by width */
       canvas {
-        max-width: 100%;
-        max-height: 100%;
+        display: block;
+        width: min(100vw, 100vh);
+        height: min(100vw, 100vh);
+        width: min(100vw, 100dvh);
+        height: min(100vw, 100dvh);
+        touch-action: none; /* dragging the end point must not scroll or zoom on touch screens */
+        cursor: crosshair;
       }
     </style>
   </head>
