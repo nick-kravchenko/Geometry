@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { buildField, Field } from './get-data';
-import { CellMap, isConnected, MAPS } from './maps';
+import { CellMap, isConnected, MapDefinition, MAPS } from './maps';
 import { Circle } from './geometry';
 import { breadthFirstSearch, circleVisibilityGraphSearch } from './pathfinding';
 
-describe.each(MAPS)('$name map', ({ generate, procedural }) => {
+// maps of cells; Kyiv has its own pixel grid and its own tests
+const CELL_MAPS = MAPS.filter((map: MapDefinition) => map.generate)
+  .map(({ name, procedural, generate }: MapDefinition) => ({ name, procedural, generate: generate as (seed: number) => CellMap }));
+
+describe.each(CELL_MAPS)('$name map', ({ generate, procedural }) => {
   const seeds: number[] = procedural ? [1, 2, 3, 42, 1234567] : [1];
 
   it.each(seeds)('connects start and end with seed %i', (seed: number) => {

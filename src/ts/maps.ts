@@ -1,4 +1,6 @@
 import { Circle, Point, pointToCircleDistance } from './geometry';
+import { Field } from './get-data';
+import { kyivField } from './kyiv';
 
 // Demo maps on a coarse grid of cells, 1 - blocked, 0 - free, plus round obstacles. The demo scales
 // them up to pixels.
@@ -16,7 +18,9 @@ export interface MapDefinition {
   name: string,
   // procedural maps change with the seed; fixed ones ignore it
   procedural: boolean,
-  generate: (seed: number) => CellMap,
+  // either a map of cells, scaled up to the canvas, or a field with its own pixel grid
+  generate?: (seed: number) => CellMap,
+  field?: () => Field,
 }
 
 // mulberry32, deterministic so a seed always gives the same map
@@ -312,6 +316,7 @@ export const MAPS: MapDefinition[] = [
   { name: 'Asteroids', procedural: true, generate: asteroids },
   { name: 'Pillars', procedural: false, generate: pillars },
   { name: 'Blobs', procedural: true, generate: blobs },
+  { name: 'Kyiv', procedural: false, field: kyivField },
 ];
 
 export const DEFAULT_SEED: number = 1;

@@ -1,4 +1,5 @@
-import { Circle, Point, Rectangle } from '../geometry';
+import { Circle, Point } from '../geometry';
+import { City, Field } from '../get-data';
 import { fillCells } from '../utils/fill-cells';
 import { COLORS } from './palette';
 
@@ -26,28 +27,39 @@ export interface Controls {
   uiHidden: boolean, // legend and controls hidden, so they don't cover the map
 }
 
+// Where the grid is drawn: canvas = grid · scale + offset.
+export interface View {
+  scale: number,
+  offsetX: number,
+  offsetY: number,
+}
+
 export function render(
   ctx: CanvasRenderingContext2D | null,
-  w: number,
+  w: number, // canvas size
   h: number,
-  startPointCoordinates: Point,
+  field: Field,
   endPointCoordinates: Point,
   layers: PathLayer[],
   controls: Controls,
   overlay: GraphOverlay | null,
-  cellWidth: number,
-  cellHeight: number,
-  squares: Rectangle[],
-  circles: Circle[],
+  { scale, offsetX, offsetY }: View,
 ): void {
   if (!ctx) return;
 
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, w, h);
   ctx.fillStyle = COLORS.field;
   ctx.fillRect(0, 0, w, h);
 
+  // the field is drawn in grid pixels; sizes meant in canvas pixels are multiplied by pixel
+  ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+  const pixel: number = 1 / scale;
+  const { cellWidth, cellHeight, squares, circles, city } = field;
+  if (city) renderCity(ctx, city, pixel);
+
   // cell coordinates on obstacles, where cells are large enough to hold them
-  const showLabels: boolean = cellWidth >= 45;
+  const showLabels: boolean = !city && cellWidth >= 45;
   ctx.font = `300 ${cellHeight * .25}px/${cellHeight * .25}px "JetBrains Mono", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -56,7 +68,7 @@ export function render(
     const [x, y]: Point = position;
     ctx.fillStyle = COLORS.obstacleFill;
     ctx.strokeStyle = COLORS.obstacleStroke;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = pixel;
     ctx.fillRect(x, y, width, height);
     ctx.strokeRect(x, y, width, height);
     ctx.fillStyle = COLORS.obstacleLabel;
@@ -65,6 +77,7 @@ export function render(
 
   ctx.fillStyle = COLORS.obstacleFill;
   ctx.strokeStyle = COLORS.obstacleStroke;
+  ctx.lineWidth = pixel;
   for (const [[x, y], radius] of circles) {
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -72,39 +85,119 @@ export function render(
     ctx.stroke();
   }
 
-  const circleSize = 12;
-
-  if (overlay) renderGraphOverlay(ctx, overlay, 3);
+  if (overlay) renderGraphOverlay(ctx, overlay, pixel);
 
   // in legend order, which puts wider paths first, so overlapping paths stay visible
   for (const layer of layers) {
     if (!layer.visible || !layer.enabled) continue;
-    if (layer.cells) fillCells(ctx, w, layer.cells, layer.color, layer.size);
-    if (layer.points) strokePolyline(ctx, layer.points, layer.color, layer.size);
+    if (layer.cells) fillCells(ctx, field.w, layer.cells, layer.color, layer.size * pixel);
+    if (layer.points) strokePolyline(ctx, layer.points, layer.color, layer.size * pixel);
   }
 
-  ctx.strokeStyle = COLORS.marker;
-  ctx.lineWidth = 1.5;
-  ctx.fillStyle = COLORS.end;
-  ctx.beginPath();
-  const [endPointX, endPointY] = endPointCoordinates;
-  ctx.arc(endPointX, endPointY, circleSize, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
+  renderMarker(ctx, endPointCoordinates, field.markerRadius, COLORS.end, pixel);
+  renderMarker(ctx, field.startPointCoordinates, field.markerRadius, COLORS.start, pixel);
 
-  ctx.fillStyle = COLORS.start;
-  ctx.beginPath();
-  const [startPointX, startPointY] = startPointCoordinates;
-  ctx.arc(startPointX, startPointY, circleSize, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (field.attribution) renderAttribution(ctx, w, h, field.attribution);
   if (controls.uiHidden) {
     renderShowUiButton(ctx, w, LEGEND_FONT_SIZE);
     return;
   }
   renderLegend(ctx, LEGEND_FONT_SIZE, layers);
   renderControls(ctx, w, LEGEND_FONT_SIZE, controls);
+}
+
+// A start or end marker at its real size; when that is too small to see, a ring around it shows where it is.
+function renderMarker(ctx: CanvasRenderingContext2D, [x, y]: Point, radius: number, color: string, pixel: number): void {
+  ctx.strokeStyle = COLORS.marker;
+  ctx.fillStyle = color;
+  ctx.lineWidth = Math.min(1.5 * pixel, radius * .3);
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  if (radius / pixel >= 6) return;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2 * pixel;
+  ctx.beginPath();
+  ctx.arc(x, y, 10 * pixel, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+// paths of a city map, built once per city
+interface CityPaths {
+  buildings: Path2D,
+  barriers: Path2D,
+  roads: Map<number, Path2D>, // by width
+  crossings: Map<number, Path2D>,
+}
+
+const cityPaths: WeakMap<City, CityPaths> = new WeakMap();
+
+function polylines(lines: Point[][], closed: boolean = false): Path2D {
+  const path: Path2D = new Path2D();
+  for (const line of lines) {
+    line.forEach(([x, y]: Point, i: number) => (i === 0 ? path.moveTo(x, y) : path.lineTo(x, y)));
+    if (closed) path.closePath();
+  }
+  return path;
+}
+
+function byWidth(lines: { width: number, points: Point[] }[]): Map<number, Path2D> {
+  const groups: Map<number, Point[][]> = new Map();
+  for (const { width, points } of lines) groups.set(width, [...groups.get(width) ?? [], points]);
+  return new Map([...groups].map(([width, group]: [number, Point[][]]): [number, Path2D] => [width, polylines(group)]));
+}
+
+function renderCity(ctx: CanvasRenderingContext2D, city: City, pixel: number): void {
+  let paths: CityPaths | undefined = cityPaths.get(city);
+  if (!paths) {
+    paths = {
+      buildings: polylines(city.buildings.flat(), true),
+      barriers: polylines(city.barriers),
+      roads: byWidth(city.roads),
+      crossings: byWidth(city.crossings),
+    };
+    cityPaths.set(city, paths);
+  }
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = COLORS.road;
+  for (const [width, path] of paths.roads) {
+    ctx.lineWidth = width;
+    ctx.stroke(path);
+  }
+  // zebra stripes: a dashed line along the crossing, as wide as the crossing
+  ctx.lineCap = 'butt';
+  ctx.strokeStyle = COLORS.crossing;
+  ctx.setLineDash([2, 2]); // half a meter
+  for (const [width, path] of paths.crossings) {
+    ctx.lineWidth = width;
+    ctx.stroke(path);
+  }
+  ctx.setLineDash([]);
+  ctx.lineCap = 'round';
+  ctx.fillStyle = COLORS.obstacleFill;
+  ctx.fill(paths.buildings, 'evenodd');
+  ctx.strokeStyle = COLORS.obstacleStroke;
+  ctx.lineWidth = pixel;
+  ctx.stroke(paths.buildings);
+  ctx.strokeStyle = COLORS.barrier;
+  ctx.lineWidth = Math.max(pixel, .8); // 0.2 m
+  ctx.stroke(paths.barriers);
+  ctx.lineCap = 'butt';
+}
+
+// data credit in the bottom-right corner
+function renderAttribution(ctx: CanvasRenderingContext2D, w: number, h: number, text: string): void {
+  const fontSize: number = 12;
+  ctx.font = `300 ${fontSize}px/${fontSize}px "JetBrains Mono", sans-serif`;
+  const width: number = ctx.measureText(text).width + fontSize;
+  drawPanel(ctx, w - width, h - fontSize * 1.75, width, fontSize * 1.75);
+  ctx.fillStyle = COLORS.text;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, w - fontSize * .5, h - fontSize * .875);
 }
 
 function strokePolyline(ctx: CanvasRenderingContext2D, points: Point[], color: string, width: number): void {
@@ -160,7 +253,7 @@ function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number, layers: P
 
 const CONTROL_ROWS: string[] = [
   '000 FPS · 000.0 ms/frame', '[ ] Diagonal (D)', '[ ] Graph overlay (G)', '▸ Map: Scatter (M)', '↻ New layout (R)', '◱ Hide UI (H)',
-  'Drag to move the end point',
+  'Drag to move the end point', 'Wheel zoom · Shift+drag pan',
 ];
 const CHECKBOX_ROWS: { control: 'diagonal' | 'overlay', label: string, row: number }[] = [
   { control: 'diagonal', label: 'Diagonal (D)', row: 1 },
@@ -170,6 +263,7 @@ const MAP_ROW: number = 3;
 const LAYOUT_ROW: number = 4;
 const HIDE_ROW: number = 5;
 const HINT_ROW: number = 6;
+const ZOOM_HINT_ROW: number = 7;
 const CLICKABLE_ROWS: { control: Control, row: number }[] = [
   ...CHECKBOX_ROWS, { control: 'map', row: MAP_ROW }, { control: 'layout', row: LAYOUT_ROW }, { control: 'ui', row: HIDE_ROW },
 ];
@@ -223,6 +317,7 @@ function renderControls(ctx: CanvasRenderingContext2D, w: number, fontSize: numb
 
   ctx.globalAlpha = .7;
   ctx.fillText(CONTROL_ROWS[HINT_ROW], left, legendRowY(fontSize, HINT_ROW));
+  ctx.fillText(CONTROL_ROWS[ZOOM_HINT_ROW], left, legendRowY(fontSize, ZOOM_HINT_ROW));
   ctx.globalAlpha = 1;
 }
 
@@ -234,7 +329,9 @@ export interface GraphOverlay {
   edges: [Point, Point][],
 }
 
-function renderGraphOverlay(ctx: CanvasRenderingContext2D, { outlines, outlineCircles = [], corners, edges }: GraphOverlay, cornerSize: number): void {
+// pixel: one canvas pixel in grid pixels
+function renderGraphOverlay(ctx: CanvasRenderingContext2D, { outlines, outlineCircles = [], corners, edges }: GraphOverlay, pixel: number): void {
+  const cornerSize: number = 3 * pixel;
   const strokeSegments = (segments: [Point, Point][], color: string, width: number): void => {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
@@ -245,8 +342,8 @@ function renderGraphOverlay(ctx: CanvasRenderingContext2D, { outlines, outlineCi
     }
     ctx.stroke();
   };
-  strokeSegments(edges, COLORS.graphEdge, 1);
-  strokeSegments(outlines, COLORS.graphOutline, 1.5);
+  strokeSegments(edges, COLORS.graphEdge, pixel);
+  strokeSegments(outlines, COLORS.graphOutline, 1.5 * pixel);
   ctx.beginPath();
   for (const [[x, y], radius] of outlineCircles) {
     ctx.moveTo(x + radius, y);

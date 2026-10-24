@@ -8,8 +8,21 @@ export interface Canvas {
   h: number,
 }
 
-// A map scaled up to canvas pixels: pathfinding runs on every pixel.
+// Streets drawn under a city map, in grid pixels: obstacles come from these, padded.
+export interface City {
+  buildings: Point[][][], // per building, its rings: filled even-odd, so inner rings are courtyards
+  barriers: Point[][], // walls and fences
+  roads: { width: number, points: Point[] }[],
+  crossings: { width: number, points: Point[] }[], // walkable lines through roads
+}
+
+// A map scaled up to a pixel grid: pathfinding runs on every pixel.
 export interface Field {
+  w: number, // grid size in pixels
+  h: number,
+  markerRadius: number, // start and end markers, in grid pixels
+  city?: City,
+  attribution?: string,
   cellWidth: number,
   cellHeight: number,
   squares: Rectangle[], // blocked cells, for drawing
@@ -84,6 +97,9 @@ export function buildField({ cellsX, cellsY, blocked, circles = [], start, end }
   const startPointCoordinates = center(start);
   const endPointCoordinates = center(end);
   return {
+    w,
+    h,
+    markerRadius: 12,
     cellWidth,
     cellHeight,
     squares,

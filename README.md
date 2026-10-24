@@ -16,10 +16,11 @@ Renders a 972×972 canvas, centered and scaled to fit the screen, with one of se
 
 All UI is drawn on the canvas:
 
-- **Drag** anywhere on the field to move the end point; every algorithm re-routes live.
+- **Drag** anywhere on the field to move the end point; every algorithm re-routes live. **Wheel** zooms around the cursor, **Shift+drag** (or the right or middle button) pans, `0` resets the view.
 - **Legend** (top left): click a row to show or hide that path. Hidden algorithms are not run, so hiding the slow ones raises the frame rate. Each row shows the algorithm's time per frame, smoothed over recent frames.
 - **Controls** (top right): frames per second, and the **Diagonal** toggle (or press `D`), which switches BFS, A* and JPS (TS and WASM) to 8-directional movement. The visibility graphs move at any angle, so they only run with Diagonal on; without it, their rows show `diagonal only`. On circle maps the pixel visibility graph is off (`not on circle maps`): a circle's pixel edge is a staircase of thousands of corners, which slows it to hundreds of milliseconds; the circle visibility graph takes its place. With Diagonal on, **Graph overlay** (or press `G`) draws the graph the visibility graph searches: obstacle outlines, corner nodes, and edges between nodes that can be part of a shortest path. On circle maps it shows the circle visibility graph instead: padded circles, tangent points and tangent segments.
-- **Map** (`M`) cycles through Spiral, Maze, Rooms, Scatter, Cave, Asteroids, Pillars and Blobs (clusters of overlapping circles); **New layout** (`R`) generates another layout of the current map (Maze, Rooms, Scatter, Cave, Asteroids and Blobs are generated from a seed, and always start from the same one). Every map keeps start and end connected.
+- **Map** (`M`) cycles through Spiral, Maze, Rooms, Scatter, Cave, Asteroids, Pillars, Blobs (clusters of overlapping circles) and Kyiv; **New layout** (`R`) generates another layout of the current map (Maze, Rooms, Scatter, Cave, Asteroids and Blobs are generated from a seed, and always start from the same one). Every map keeps start and end connected.
+- **Kyiv**: central Kyiv around Bessarabsky Market (Besarabska Square 2) from [OpenStreetMap](https://www.openstreetmap.org/copyright), 972 m across at 0.25 m per pixel, so start and end are people: the grid is 3888×3888 and drawn scaled down (zoom in to see them). Buildings, walls, fences and car roads (lanes × 3.5 m wide) are obstacles; marked crossings and underpasses cut walkable strips through the roads; every obstacle is padded by a person's radius (0.3 m). With 16 times the pixels, grid searches take tens to hundreds of milliseconds, so on Kyiv they run only when the end point, the mode or the shown algorithms change, not every frame. The pixel visibility graph is off there (`not on city maps`): slanted walls are pixel staircases, and it takes seconds. `node scripts/fetch-kyiv.mjs` downloads the data again into `src/ts/data/kyiv.json`.
 - **Hide UI** (`H`) hides the legend and controls when they cover the map; a small button brings them back.
 
 Colors come from the [Ocean Sunset](https://coolors.co/001219-005f73-0a9396-94d2bd-e9d8a6-ee9b00-ca6702-bb3e03-ae2012-9b2226) palette by Coolors, one hue per algorithm: each WASM path is drawn wide and translucent under its thin TS twin.
@@ -28,7 +29,7 @@ Shown and hidden algorithms, the map, and the Diagonal, Graph overlay and Hide U
 
 Timings come from `performance.now`, which browsers coarsen on pages that are not cross-origin isolated, such as GitHub Pages, so individual measurements there are whole milliseconds; the smoothing evens this out.
 
-Opening the demo with `?benchmark` (or `?benchmark=N` for N runs, 20 by default) times every algorithm that can run on every map, at its default layout and end point, in both movement modes, before the demo starts. Results go to the console as a table (median and fastest time, path length) and to `window.benchmarkResults`. Benchmark a production build (`npm run build`): `npm start` builds WASM unoptimized.
+Opening the demo with `?benchmark` (or `?benchmark=N` for N runs, 20 by default; add `&map=Kyiv` for one map) times every algorithm that can run on every map, at its default layout and end point, in both movement modes, before the demo starts. Results go to the console as a table (median and fastest time, path length) and to `window.benchmarkResults`. Benchmark a production build (`npm run build`): `npm start` builds WASM unoptimized.
 
 ## Stack
 
