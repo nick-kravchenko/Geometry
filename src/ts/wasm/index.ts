@@ -19,15 +19,15 @@ import { CellMap, DEFAULT_SEED, MapDefinition, MAPS } from '../maps';
 import { clamp, getCoordinatesByMouseEvent } from '../utils';
 import { COLORS, wasmPathColor } from './palette';
 import { controlAt, GraphOverlay, LEGEND_FONT_SIZE, legendRowAt, PathLayer, render, View } from './render';
-import { createTraffic, stampCircles, stepTraffic, Traffic, trafficCircles, trafficShapes, unstamp } from './traffic';
+import { createTraffic, stepTraffic, Traffic, trafficCircles, trafficShapes } from './traffic';
 
 // weight of the newest frame in the timings shown in the legend; smooths frame-to-frame noise
 const SMOOTHING: number = .1;
 // closest zoom, in canvas pixels per grid pixel
 const MAX_SCALE: number = 16;
 // traffic on city maps
-const PEDESTRIANS: number = 200;
-const CARS: number = 40;
+const PEDESTRIANS: number = 600;
+const CARS: number = 120;
 const MOVER_RADIUS: number = .3; // meters: the one whose path is searched is a person too
 
 // Demo settings remembered between visits; the end point and a map's random layout are not,
@@ -105,14 +105,10 @@ function start(module: typeof import('pkg')): void {
   // zoom 1 fits the grid in the canvas; center is the grid point in the middle of the canvas
   let zoom: number = 1;
   let center: Point;
-  // the map's obstacles, and the grid the grid searches read: a copy with the traffic stamped in on city
-  // maps, the same array elsewhere
-  let staticGrid: Uint8Array;
   let grid: Uint8Array;
   let traffic: Traffic | null;
   let movingCircles: Circle[] = []; // the traffic as obstacles, this frame
   let movingFlat: Float64Array = new Float64Array(0); // the same as [x, y, radius, ...], for WASM
-  const stamped: number[] = [], wasmStamped: number[] = [];
   let from: number;
   let end: number;
   let endCoordinates: Point;
@@ -132,13 +128,10 @@ function start(module: typeof import('pkg')): void {
     ({ w, h } = field);
     zoom = 1;
     center = [w / 2, h / 2];
-    staticGrid = field.blockedCellsUint8Array;
-    grid = field.city ? staticGrid.slice() : staticGrid;
+    grid = field.blockedCellsUint8Array;
     traffic = null;
     movingCircles = [];
     movingFlat = new Float64Array(0);
-    stamped.length = 0;
-    wasmStamped.length = 0;
     from = field.startPointNumber;
     end = field.endPointNumber;
     endCoordinates = field.endPointCoordinates;
@@ -180,39 +173,40 @@ function start(module: typeof import('pkg')): void {
     !diagonal ? 'diagonal only' : !circleMap ? 'circle maps only' : null
   );
   const always: Availability = (): null => null;
+  // city maps are too large for grid searches: their buffers would take gigabytes, a search seconds
+  const gridSearch: Availability = (_diagonal: boolean, _circleMap: boolean, cityMap: boolean): string | null => (cityMap ? 'grid too large' : null);
   const diagonalOnly: Availability = (diagonal: boolean): string | null => (!diagonal ? 'diagonal only' : null);
   // the outlines may cut into obstacles by the tolerance, so it stays within the padding
   const tolerance = (): number => Math.min(1.5, Math.max(1, field.padding));
   // both built from the map without traffic
-  const navigationGraph = (): NavigationGraph => navigation ??= buildNavigationGraph(staticGrid, w, h, tolerance());
+  const navigationGraph = (): NavigationGraph => navigation ??= buildNavigationGraph(grid, w, h, tolerance());
   const buildWasmNavigation = (): void => {
     if (!wasmNavigation) wasm().build_navigation_graph(tolerance());
     wasmNavigation = true;
   };
   const pixelCenter = ([x, y]: Point): Point => [x + .5, y + .5];
 
-  // label, color, path width, search, when the algorithm can run, and whether it is fast enough to
-  // search every frame on city maps
-  type Algorithm = [string, string, number, Search, Availability?, boolean?];
+  // label, color, path width, search, and when the algorithm can run
+  type Algorithm = [string, string, number, Search, Availability?];
   const algorithms: Algorithm[] = [
     ['[WASM] BFS', wasmPathColor(COLORS.breadthFirst), 6, (end: number, diagonal: boolean): SearchResult => ({
       cells: wasm().breadth_first_search(from, end, diagonal),
-    })],
+    }), gridSearch],
     ['[TS] BFS', COLORS.breadthFirst, 2, (end: number, diagonal: boolean): SearchResult => ({
       cells: diagonal ? breadthFirstSearchDiagonal(grid, w, h, from, end) : breadthFirstSearch(grid, w, h, from, end),
-    })],
+    }), gridSearch],
     ['[WASM] A*', wasmPathColor(COLORS.aStar), 6, (end: number, diagonal: boolean): SearchResult => ({
       cells: wasm().a_star_search(from, end, diagonal),
-    })],
+    }), gridSearch],
     ['[TS] A*', COLORS.aStar, 2, (end: number, diagonal: boolean): SearchResult => ({
       cells: aStarSearch(grid, w, h, from, end, diagonal),
-    })],
+    }), gridSearch],
     ['[WASM] JPS', wasmPathColor(COLORS.jumpPoint), 6, (end: number, diagonal: boolean): SearchResult => ({
       cells: wasm().jump_point_search(from, end, diagonal),
-    })],
+    }), gridSearch],
     ['[TS] JPS', COLORS.jumpPoint, 2, (end: number, diagonal: boolean): SearchResult => ({
       cells: jumpPointSearch(grid, w, h, from, end, diagonal),
-    })],
+    }), gridSearch],
     // the visibility graph moves at any angle, so it is only compared with the diagonal searches
     ['[WASM] Visibility graph', wasmPathColor(COLORS.visibilityGraph), 6, (end: number): SearchResult => ({
       points: toPoints(wasm().visibility_graph_search(from, end)),
@@ -233,10 +227,10 @@ function start(module: typeof import('pkg')): void {
       buildWasmNavigation();
       const [startX, startY] = pixelCenter(field.startPointCoordinates), [endX, endY] = pixelCenter(endCoordinates);
       return { points: toPoints(wasm().navigation_graph_search(startX, startY, endX, endY, movingFlat)) };
-    }, diagonalOnly, true],
+    }, diagonalOnly],
     ['[TS] Navigation graph', COLORS.navigation, 2, (): SearchResult => ({
-      points: navigationGraphSearch(navigationGraph(), staticGrid, w, h, pixelCenter(field.startPointCoordinates), pixelCenter(endCoordinates), movingCircles),
-    }), diagonalOnly, true],
+      points: navigationGraphSearch(navigationGraph(), grid, w, h, pixelCenter(field.startPointCoordinates), pixelCenter(endCoordinates), movingCircles),
+    }), diagonalOnly],
   ];
   const layers: PathLayer[] = algorithms.map(([label, color, size]): PathLayer => ({
     label, color, size, time: NaN, visible: !settings.hidden.includes(label), enabled: true,
@@ -293,17 +287,11 @@ function start(module: typeof import('pkg')): void {
   let fps: string = '– FPS';
 
   // Every frame searches again with every visible algorithm, as a game would while things move;
-  // hidden algorithms are skipped, so hiding the slow ones raises the frame rate. City maps have 16
-  // times the pixels, where grid searches take far longer than a frame: except for the navigation graph,
-  // they search only when the end point, the mode, the map or the shown algorithms change.
-  let searched: string = '';
+  // hidden algorithms are skipped, so hiding the slow ones raises the frame rate.
   function search(): void {
-    const state: string = [mapIndex, seed, end, diagonal, trafficOn, ...layers.map(({ visible }: PathLayer) => visible)].join();
-    const unchanged: boolean = isCityMap() && state === searched;
-    searched = state;
-    algorithms.forEach(([, , , run, , realTime]: Algorithm, i: number) => {
+    algorithms.forEach(([, , , run]: Algorithm, i: number) => {
       const layer: PathLayer = layers[i];
-      if (!layer.visible || !layer.enabled || (unchanged && !realTime)) return;
+      if (!layer.visible || !layer.enabled) return;
       const startTime: number = performance.now();
       const result: SearchResult = run(end, diagonal);
       const time: number = performance.now() - startTime;
@@ -324,13 +312,12 @@ function start(module: typeof import('pkg')): void {
     fps = `${frameTimes.length} FPS · ${frameTime.toFixed(1)} ms/frame`;
   }
 
-  // Moves the traffic on city maps and stamps it into the grids. Pedestrians are routed on the grid
-  // without traffic, so the stamps come off first, and the navigation graphs are built before any.
+  // Moves the traffic on city maps. Pedestrians are routed on the navigation graph without traffic.
   const meter = (): number => 1 / METERS_PER_PIXEL;
   const freeSpot = (): Point => {
     for (;;) {
       const cell: number = ~~(Math.random() * w * h);
-      if (!staticGrid[cell]) return [cell % w + .5, ~~(cell / w) + .5];
+      if (!grid[cell]) return [cell % w + .5, ~~(cell / w) + .5];
     }
   };
   const route = ([fromX, fromY]: Point, [toX, toY]: Point): Point[] => toPoints(wasm().navigation_graph_search(fromX, fromY, toX, toY, new Float64Array(0)));
@@ -338,21 +325,16 @@ function start(module: typeof import('pkg')): void {
   function moveTraffic(now: number): void {
     const seconds: number = Number.isNaN(lastFrame) ? 0 : Math.min(.1, (now - lastFrame) / 1000);
     lastFrame = now;
-    const wasmGrid = (): Uint8Array => new Uint8Array(wasm_memory().buffer, wasm().cells_ptr(), w * h);
-    unstamp(grid, stamped);
-    unstamp(wasmGrid(), wasmStamped);
     if (!field.city || !trafficOn) {
       movingCircles = [];
       movingFlat = new Float64Array(0);
       return;
     }
     buildWasmNavigation();
-    traffic ??= createTraffic(field.city, staticGrid, w, h, meter(), PEDESTRIANS, CARS);
+    traffic ??= createTraffic(field.city, grid, w, h, meter(), PEDESTRIANS, CARS);
     stepTraffic(traffic, seconds, meter(), route, freeSpot);
     movingCircles = trafficCircles(traffic, meter(), MOVER_RADIUS);
     movingFlat = new Float64Array(movingCircles.flatMap(([[x, y], radius]: Circle) => [x, y, radius]));
-    stampCircles(grid, w, h, movingCircles, stamped);
-    stampCircles(wasmGrid(), w, h, movingCircles, wasmStamped);
   }
 
   function frame(now: number): void {

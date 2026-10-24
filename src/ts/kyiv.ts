@@ -2,8 +2,9 @@ import { Point } from './geometry';
 import { City, Field } from './get-data';
 import kyiv from './data/kyiv.json';
 
-// Central Kyiv around Bessarabsky Market, from OpenStreetMap (scripts/fetch-kyiv.mjs): 972 m across at
-// 0.25 m per pixel, so start and end are people. Buildings, walls, fences and car roads are obstacles;
+// Central Kyiv around Bessarabsky Market, from OpenStreetMap (scripts/fetch-kyiv.mjs): 2.44 km across at
+// 0.25 m per pixel, so start and end are people; the map reaches the National Philharmonic
+// (Volodymyrskyi Descent 2) on its edge. Buildings, walls, fences and car roads are obstacles;
 // marked crossings and underpasses cut walkable lines through the roads. Every obstacle is padded by
 // a person's radius, so a path is where a person's center can go.
 export const METERS_PER_PIXEL: number = .25;
@@ -12,6 +13,8 @@ export const PERSON_RADIUS: number = .3; // meters
 interface KyivData {
   attribution: string,
   size: number, // decimeters
+  start: number[], // Bessarabsky Market and the Philharmonic, decimeters
+  end: number[],
   buildings: number[][][], // per building, rings as flat [x, y, ...] in decimeters
   barriers: number[][],
   roads: number[][], // [width, x, y, ...]
@@ -25,10 +28,6 @@ const toPoints = (flat: number[], from: number = 0): Point[] => {
   for (let i: number = from; i + 1 < flat.length; i += 2) points.push([flat[i] * SCALE, flat[i + 1] * SCALE]);
   return points;
 };
-
-// where start and end go, in meters from the top-left corner: the free spot nearest to each
-const START: Point = [486, 486]; // Bessarabsky Market
-const END: Point = [600, 40]; // Khreshchatyk, towards Maidan
 
 // Sets every pixel whose center is within reach of the polyline to value.
 function strokeLine(grid: Uint8Array, w: number, h: number, points: Point[], reach: number, value: number): void {
@@ -70,41 +69,46 @@ function fillPolygon(grid: Uint8Array, w: number, h: number, rings: Point[][]): 
   }
 }
 
-// Labels the free pixels connected to each other moving horizontally and vertically; returns the label
-// of every pixel (-1 for blocked) and the largest label.
-function largestRegion(grid: Uint8Array, w: number, h: number): [Int32Array, number] {
-  const labels: Int32Array = new Int32Array(w * h).fill(-1);
-  const queue: Int32Array = new Int32Array(w * h);
-  let largest: number = -1, largestSize: number = 0;
-  for (let seed: number = 0, label: number = 0; seed < w * h; seed++) {
-    if (grid[seed] || labels[seed] !== -1) continue;
-    let length: number = 1;
-    queue[0] = seed;
-    labels[seed] = label;
-    for (let k: number = 0; k < length; k++) {
-      const cell: number = queue[k], x: number = cell % w;
-      const neighbors: number[] = [x > 0 ? cell - 1 : -1, x < w - 1 ? cell + 1 : -1, cell - w, cell + w];
-      for (const next of neighbors) {
-        if (next < 0 || next >= w * h || grid[next] || labels[next] !== -1) continue;
-        labels[next] = label;
-        queue[length++] = next;
+// The free pixels connected to the seed moving horizontally and vertically, as a bitset: span fill,
+// light on memory for large grids.
+function region(grid: Uint8Array, w: number, h: number, [seedX, seedY]: Point): Uint32Array {
+  const filled: Uint32Array = new Uint32Array(Math.ceil(w * h / 32));
+  const isFilled = (cell: number): boolean => ((filled[cell >>> 5] >>> (cell & 31)) & 1) === 1;
+  const open = (x: number, y: number): boolean => x >= 0 && x < w && grid[y * w + x] === 0 && !isFilled(y * w + x);
+  const seeds: number[] = [seedX, seedY];
+  while (seeds.length > 0) {
+    const y: number = seeds.pop() as number, x: number = seeds.pop() as number;
+    if (!open(x, y)) continue;
+    let left: number = x, right: number = x;
+    while (open(left - 1, y)) left--;
+    while (open(right + 1, y)) right++;
+    for (let fillX: number = left; fillX <= right; fillX++) filled[(y * w + fillX) >>> 5] |= 1 << ((y * w + fillX) & 31);
+    // one seed per run of open pixels in the rows above and below
+    for (const nextY of [y - 1, y + 1]) {
+      if (nextY < 0 || nextY >= h) continue;
+      for (let nextX: number = left; nextX <= right; nextX++) {
+        if (open(nextX, nextY) && !open(nextX - 1, nextY)) seeds.push(nextX, nextY);
       }
+      if (open(left, nextY)) seeds.push(left, nextY);
     }
-    if (length > largestSize) [largest, largestSize] = [label, length];
-    label++;
   }
-  return [labels, largest];
+  return filled;
 }
 
-function nearestIn(labels: Int32Array, label: number, w: number, h: number, [targetX, targetY]: Point): Point {
-  let best: Point = [0, 0], bestDistance: number = Infinity;
-  for (let y: number = 0; y < h; y++) {
-    for (let x: number = 0; x < w; x++) {
-      const distance: number = (x - targetX) ** 2 + (y - targetY) ** 2;
-      if (labels[y * w + x] === label && distance < bestDistance) [best, bestDistance] = [[x, y], distance];
+// The pixel nearest to the target that passes accept, looking in growing squares around it.
+function nearest(w: number, h: number, [targetX, targetY]: Point, accept: (cell: number) => boolean): Point {
+  const tx: number = Math.min(w - 1, Math.max(0, Math.floor(targetX))), ty: number = Math.min(h - 1, Math.max(0, Math.floor(targetY)));
+  let best: Point | null = null, bestDistance: number = Infinity;
+  for (let ring: number = 0; ring < Math.max(w, h) && ring * ring < bestDistance; ring++) {
+    for (let y: number = Math.max(0, ty - ring); y <= Math.min(h - 1, ty + ring); y++) {
+      for (let x: number = Math.max(0, tx - ring); x <= Math.min(w - 1, tx + ring); x++) {
+        if (Math.max(Math.abs(x - tx), Math.abs(y - ty)) !== ring || !accept(y * w + x)) continue;
+        const distance: number = (x - tx) ** 2 + (y - ty) ** 2;
+        if (distance < bestDistance) [best, bestDistance] = [[x, y], distance];
+      }
     }
   }
-  return best;
+  return best ?? [tx, ty];
 }
 
 let cached: Field | null = null;
@@ -134,9 +138,10 @@ export function kyivField(): Field {
   }
   for (const line of city.barriers) strokeLine(grid, w, h, line, .1 * meter + padding, 1);
 
-  const [labels, largest] = largestRegion(grid, w, h);
-  const startPointCoordinates: Point = nearestIn(labels, largest, w, h, [START[0] * meter, START[1] * meter]);
-  const endPointCoordinates: Point = nearestIn(labels, largest, w, h, [END[0] * meter, END[1] * meter]);
+  // start on a free pixel by the market, end on the pixel nearest to the Philharmonic it can reach
+  const startPointCoordinates: Point = nearest(w, h, [data.start[0] * SCALE, data.start[1] * SCALE], (cell: number) => grid[cell] === 0);
+  const reachable: Uint32Array = region(grid, w, h, startPointCoordinates);
+  const endPointCoordinates: Point = nearest(w, h, [data.end[0] * SCALE, data.end[1] * SCALE], (cell: number) => ((reachable[cell >>> 5] >>> (cell & 31)) & 1) === 1);
   cached = {
     w,
     h,

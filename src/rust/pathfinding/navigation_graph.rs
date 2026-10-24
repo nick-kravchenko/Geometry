@@ -7,6 +7,9 @@ const WALL_CELL: f64 = 32.0;
 const NODE_CELL: f64 = 64.0;
 // how far a temporary node around a moving obstacle looks for nodes to link to: 40 m on Kyiv
 const MOVING_REACH: f64 = 160.0;
+// the longest edge, and how far start and end look for nodes first: 200 m on Kyiv. Longer lines of sight
+// go through nodes on the way, at a small cost in length.
+const EDGE_REACH: f64 = 800.0;
 
 // A moving obstacle: center x, center y, radius, already grown by the mover's radius.
 pub type Circle = (f64, f64, f64);
@@ -210,55 +213,47 @@ pub fn is_segment_clear(grid: &[u8], w: usize, h: usize, x0: f64, y0: f64, x1: f
 }
 
 // Outlines of the blocked regions as closed loops of pixel corners [x0, y0, x1, y1, ...], walked with
-// the obstacle on the left (y points down). Outside the grid counts as blocked.
-pub fn trace_outlines(grid: &[u8], w: usize, h: usize) -> Vec<Vec<i64>> {
-  let width = w + 1;
-  // up to two outgoing edges per pixel corner (two where obstacles touch diagonally): the target corner
-  let mut out: Vec<usize> = vec![NONE; width * (h + 1) * 2];
-  let add = |out: &mut Vec<usize>, from: usize, to: usize| {
-    let slot = if out[2 * from] == NONE { 0 } else { 1 };
-    out[2 * from + slot] = to;
-  };
-  for y in 0..=h {
-    for x in 0..=w {
-      let here = blocked(grid, w, h, x as i64, y as i64);
-      if x < w && here != blocked(grid, w, h, x as i64, y as i64 - 1) { // horizontal edge at the top of pixel (x, y)
-        if here { add(&mut out, y * width + x + 1, y * width + x); } else { add(&mut out, y * width + x, y * width + x + 1); }
-      }
-      if y < h && here != blocked(grid, w, h, x as i64 - 1, y as i64) { // vertical edge at the left of pixel (x, y)
-        if here { add(&mut out, y * width + x, (y + 1) * width + x); } else { add(&mut out, (y + 1) * width + x, y * width + x); }
-      }
-    }
-  }
-  let mut loops = Vec::new();
-  for first in 0..width * (h + 1) {
-    while out[2 * first] != NONE || out[2 * first + 1] != NONE {
+// the obstacle on the left (y points down), passed to visit one at a time. Outside the grid counts as
+// blocked. Walks each contour on the grid itself, keeping only a bit per horizontal pixel edge to know
+// which contours are done, so large grids need little memory.
+pub fn trace_outlines(grid: &[u8], w: usize, h: usize, mut visit: impl FnMut(Vec<i64>)) {
+  let is_blocked = |x: i64, y: i64| blocked(grid, w, h, x, y);
+  // traced horizontal edges: bit y * w + x for the edge at the top of pixel (x, y), 0 <= y <= h
+  let mut done = vec![0u32; (w * (h + 1)).div_ceil(32)];
+  let bit = |x: i64, y: i64| y as usize * w + x as usize;
+  for y in 0..=h as i64 {
+    for x in 0..w as i64 {
+      let b = bit(x, y);
+      if is_blocked(x, y) == is_blocked(x, y - 1) || (done[b >> 5] >> (b & 31)) & 1 == 1 { continue; }
+      // a contour not traced yet, through the top edge of pixel (x, y): west when the pixel is blocked
+      let (mut cx, mut cy, mut dx, mut dy) = if is_blocked(x, y) { (x + 1, y, -1i64, 0i64) } else { (x, y, 1, 0) };
+      let (start_x, start_y, start_dx) = (cx, cy, dx);
       let mut outline = Vec::new();
-      let (mut corner, mut direction_x, mut direction_y) = (first, 0i64, 0i64);
       loop {
+        outline.push(cx);
+        outline.push(cy);
+        if dx != 0 {
+          let b = bit(if dx > 0 { cx } else { cx - 1 }, cy);
+          done[b >> 5] |= 1 << (b & 31);
+        }
+        cx += dx;
+        cy += dy;
+        // edges leaving the corner with the obstacle on their left
+        let (up_left, up_right, down_left, down_right) = (is_blocked(cx - 1, cy - 1), is_blocked(cx, cy - 1), is_blocked(cx - 1, cy), is_blocked(cx, cy));
+        let mut exits = [(0i64, 0i64); 2];
+        let mut count = 0;
+        for (exists, exit) in [(up_right && !down_right, (1, 0)), (down_left && !up_left, (-1, 0)), (down_right && !down_left, (0, 1)), (up_left && !up_right, (0, -1))] {
+          if exists && count < 2 { exits[count] = exit; count += 1; }
+        }
         // where two edges leave a corner, turn left, towards the obstacle, so obstacles that only touch
         // diagonally get separate outlines
-        let mut slot = if out[2 * corner] != NONE { 0 } else { 1 };
-        if out[2 * corner] != NONE && out[2 * corner + 1] != NONE {
-          let target = out[2 * corner];
-          let (turn_x, turn_y) = (direction_y, -direction_x); // left of the current direction
-          let left = (target % width) as i64 - (corner % width) as i64 == turn_x && (target / width) as i64 - (corner / width) as i64 == turn_y;
-          slot = if left { 0 } else { 1 };
-        }
-        let target = out[2 * corner + slot];
-        if target == NONE { break; }
-        out[2 * corner + slot] = NONE;
-        outline.push((corner % width) as i64);
-        outline.push((corner / width) as i64);
-        direction_x = (target % width) as i64 - (corner % width) as i64;
-        direction_y = (target / width) as i64 - (corner / width) as i64;
-        corner = target;
-        if corner == first { break; } // closed
+        let left = count == 2 && exits[0] == (dy, -dx);
+        (dx, dy) = if count == 2 && !left { exits[1] } else { exits[0] };
+        if cx == start_x && cy == start_y && dx == start_dx && dy == 0 { break; }
       }
-      loops.push(outline);
+      visit(outline);
     }
   }
-  loops
 }
 
 // Douglas–Peucker on a closed loop: keeps the vertices needed to stay within tolerance of it.
@@ -389,7 +384,7 @@ impl NavigationGraph {
   pub fn build(grid: &[u8], w: usize, h: usize, tolerance: f64) -> NavigationGraph {
     let mut walls = Vec::new();
     let mut nodes = Nodes::default();
-    for outline in trace_outlines(grid, w, h) {
+    trace_outlines(grid, w, h, |outline| {
       let outline = simplify_loop(&outline, tolerance);
       let n = outline.len() / 2;
       for i in 0..n {
@@ -414,19 +409,28 @@ impl NavigationGraph {
           break;
         }
       }
-    }
+    });
     let wall_boxes: Vec<f64> = walls.as_chunks::<4>().0.iter().flat_map(|s| [s[0].min(s[2]), s[1].min(s[3]), s[0].max(s[2]), s[1].max(s[3])]).collect();
     let wall_cells = Buckets::new(&wall_boxes, w, h, WALL_CELL);
     let mut seen = vec![0; walls.len() / 4];
 
     let n = nodes.len();
+    let node_boxes: Vec<f64> = (0..n).flat_map(|i| [nodes.x[i], nodes.y[i], nodes.x[i], nodes.y[i]]).collect();
+    let node_cells = Buckets::new(&node_boxes, w, h, NODE_CELL);
+    // pairs within EDGE_REACH of each other only, so large grids with many nodes build in seconds
     let mut neighbours: Vec<Vec<u32>> = vec![Vec::new(); n];
     let mut test = 0;
+    let mut near = Vec::new();
     for a in 0..n {
-      for b in a + 1..n {
-        if !nodes.wraps(a, (nodes.x[b], nodes.y[b])) || !nodes.wraps(b, (nodes.x[a], nodes.y[a])) { continue; }
+      let (ax, ay) = (nodes.x[a], nodes.y[a]);
+      node_cells.near(ax - EDGE_REACH, ay - EDGE_REACH, ax + EDGE_REACH, ay + EDGE_REACH, &mut near);
+      for &b in &near {
+        let b = b as usize;
+        let (bx, by) = (nodes.x[b], nodes.y[b]);
+        if b <= a || (bx - ax) * (bx - ax) + (by - ay) * (by - ay) > EDGE_REACH * EDGE_REACH { continue; }
+        if !nodes.wraps(a, (bx, by)) || !nodes.wraps(b, (ax, ay)) { continue; }
         let stamp = next_test(&mut seen, &mut test);
-        if !is_visible(&walls, &wall_cells, &mut seen, stamp, nodes.x[a], nodes.y[a], nodes.x[b], nodes.y[b]) { continue; }
+        if !is_visible(&walls, &wall_cells, &mut seen, stamp, ax, ay, bx, by) { continue; }
         neighbours[a].push(b as u32);
         neighbours[b].push(a as u32);
       }
@@ -438,10 +442,9 @@ impl NavigationGraph {
       for &b in list { costs.push(length(nodes.x[b as usize] - nodes.x[a], nodes.y[b as usize] - nodes.y[a])); }
     }
     let targets = neighbours.concat();
-    let node_boxes: Vec<f64> = (0..n).flat_map(|i| [nodes.x[i], nodes.y[i], nodes.x[i], nodes.y[i]]).collect();
     let graph = Graph {
       components: components(&offsets, &targets),
-      node_cells: Buckets::new(&node_boxes, w, h, NODE_CELL),
+      node_cells,
       nodes, offsets, targets, costs, walls, wall_cells,
     };
     seen.fill(0); // the search's stamps count from 0 again
@@ -623,8 +626,15 @@ impl Query<'_> {
   // nodes can link through them too.
   fn link(&mut self, to_end: bool, point: (f64, f64), components: &mut HashSet<u32>) -> Vec<(f64, f64)> {
     let mut components = Some(components);
-    let total = self.b.nodes.len();
-    if self.reach(to_end, point, 0.0, None, 0, total, &mut components) { return Vec::new(); }
+    // nodes within EDGE_REACH, then all of them if none of those
+    let (n, total) = (self.graph.nodes.len(), self.b.nodes.len());
+    let mut near = Vec::new();
+    self.graph.node_cells.near(point.0 - EDGE_REACH, point.1 - EDGE_REACH, point.0 + EDGE_REACH, point.1 + EDGE_REACH, &mut near);
+    let mut linked = false;
+    for node in near { linked |= self.reach_node(to_end, point, 0.0, None, node as usize, &mut components); }
+    if self.reach(to_end, point, 0.0, None, n, total, &mut components) || linked || self.reach(to_end, point, 0.0, None, 0, n, &mut components) {
+      return Vec::new();
+    }
     if let Some(pushed) = self.push_off(point) {
       let total = self.b.nodes.len();
       if self.reach(to_end, pushed, length(pushed.0 - point.0, pushed.1 - point.1), Some(pushed), 0, total, &mut components) { return vec![pushed]; }

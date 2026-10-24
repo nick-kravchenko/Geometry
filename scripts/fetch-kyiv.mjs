@@ -1,11 +1,12 @@
-// Downloads the OpenStreetMap data behind the Kyiv map: a 972 m square around Bessarabsky Market
-// (Besarabska Square 2). Writes src/ts/data/kyiv.json with coordinates in decimeters from the square's
-// top-left corner, x east, y south. Run once: node scripts/fetch-kyiv.mjs
+// Downloads the OpenStreetMap data behind the Kyiv map: a square centered on Bessarabsky Market
+// (Besarabska Square 2), just large enough to reach the National Philharmonic (Volodymyrskyi Descent 2)
+// on its edge. Writes src/ts/data/kyiv.json with coordinates in decimeters from the square's top-left
+// corner, x east, y south. Run once: node scripts/fetch-kyiv.mjs
 // Data © OpenStreetMap contributors, ODbL 1.0, https://www.openstreetmap.org/copyright
 import { mkdirSync, writeFileSync } from 'node:fs';
 
-const CENTER = [50.4424448, 30.5215972]; // Bessarabsky Market, lat, lon
-const SIZE = 972; // meters
+const CENTER = [50.4424448, 30.5215972]; // Bessarabsky Market, lat, lon: the map's center and its start
+const FARTHEST = [50.4533063, 30.5282638]; // Volodymyrskyi Descent 2: on the map's edge, its end
 const LANE_WIDTH = 3.5; // meters, for roads without a width tag
 const CROSSING_WIDTH = 3; // meters
 // walkable roads (service, living_street, footways...) are left out
@@ -16,12 +17,14 @@ const BARRIERS = new Set(['wall', 'fence', 'retaining_wall', 'hedge', 'city_wall
 
 const metersPerDegreeLat = 111320;
 const metersPerDegreeLon = metersPerDegreeLat * Math.cos(CENTER[0] * Math.PI / 180);
-const half = SIZE / 2;
+// half the square's side: the farther of the two offsets to the end, and 10 m to spare
+const half = Math.ceil(Math.max(Math.abs(FARTHEST[0] - CENTER[0]) * metersPerDegreeLat, Math.abs(FARTHEST[1] - CENTER[1]) * metersPerDegreeLon)) + 10;
+const SIZE = 2 * half; // meters
 const south = CENTER[0] - half / metersPerDegreeLat, north = CENTER[0] + half / metersPerDegreeLat;
 const west = CENTER[1] - half / metersPerDegreeLon, east = CENTER[1] + half / metersPerDegreeLon;
 const bbox = `${south},${west},${north},${east}`;
 
-const query = `[out:json][timeout:90];
+const query = `[out:json][timeout:180];
 (
   way["building"](${bbox});
   relation["building"](${bbox});
@@ -120,10 +123,13 @@ for (const way of roadWays) {
   });
 }
 
+const [startLat, startLon] = CENTER, [endLat, endLon] = FARTHEST;
 const data = {
   attribution: '© OpenStreetMap contributors',
   center: CENTER,
   size: SIZE * 10,
+  start: project({ lat: startLat, lon: startLon }),
+  end: project({ lat: endLat, lon: endLon }),
   buildings,
   barriers,
   roads,
@@ -131,4 +137,4 @@ const data = {
 };
 mkdirSync(new URL('../src/ts/data/', import.meta.url), { recursive: true });
 writeFileSync(new URL('../src/ts/data/kyiv.json', import.meta.url), JSON.stringify(data));
-console.log(`${buildings.length} buildings, ${barriers.length} barriers, ${roads.length} roads, ${crossings.length} crossings`);
+console.log(`${SIZE} m: ${buildings.length} buildings, ${barriers.length} barriers, ${roads.length} roads, ${crossings.length} crossings`);

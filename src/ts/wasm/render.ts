@@ -357,34 +357,56 @@ export interface GraphOverlay {
   edges: [Point, Point][],
 }
 
+// Paths of an overlay, kept while the overlay object is: the navigation graph's on a city map is
+// static and holds hundreds of thousands of segments. Corners are rebuilt when their size changes.
+interface OverlayPaths {
+  edges: Path2D,
+  outlines: Path2D,
+  corners: Path2D,
+  cornerSize: number,
+}
+
+const overlayPaths: WeakMap<GraphOverlay, OverlayPaths> = new WeakMap();
+
+function segmentsPath(segments: [Point, Point][]): Path2D {
+  const path: Path2D = new Path2D();
+  for (const [[x0, y0], [x1, y1]] of segments) {
+    path.moveTo(x0, y0);
+    path.lineTo(x1, y1);
+  }
+  return path;
+}
+
 // pixel: one canvas pixel in grid pixels
-function renderGraphOverlay(ctx: CanvasRenderingContext2D, { outlines, outlineCircles = [], corners, edges }: GraphOverlay, pixel: number): void {
+function renderGraphOverlay(ctx: CanvasRenderingContext2D, overlay: GraphOverlay, pixel: number): void {
+  const { outlines, outlineCircles = [], corners, edges } = overlay;
   const cornerSize: number = 3 * pixel;
-  const strokeSegments = (segments: [Point, Point][], color: string, width: number): void => {
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.beginPath();
-    for (const [[x0, y0], [x1, y1]] of segments) {
-      ctx.moveTo(x0, y0);
-      ctx.lineTo(x1, y1);
+  let paths: OverlayPaths | undefined = overlayPaths.get(overlay);
+  if (!paths) {
+    const outlinePath: Path2D = segmentsPath(outlines);
+    for (const [[x, y], radius] of outlineCircles) {
+      outlinePath.moveTo(x + radius, y);
+      outlinePath.arc(x, y, radius, 0, Math.PI * 2);
     }
-    ctx.stroke();
-  };
-  strokeSegments(edges, COLORS.graphEdge, pixel);
-  strokeSegments(outlines, COLORS.graphOutline, 1.5 * pixel);
-  ctx.beginPath();
-  for (const [[x, y], radius] of outlineCircles) {
-    ctx.moveTo(x + radius, y);
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    paths = { edges: segmentsPath(edges), outlines: outlinePath, corners: new Path2D(), cornerSize: NaN };
+    overlayPaths.set(overlay, paths);
   }
-  ctx.stroke();
+  if (paths.cornerSize !== cornerSize) {
+    paths.corners = new Path2D();
+    for (const [x, y] of corners) {
+      paths.corners.moveTo(x + cornerSize, y);
+      paths.corners.arc(x, y, cornerSize, 0, Math.PI * 2);
+    }
+    paths.cornerSize = cornerSize;
+  }
+  ctx.strokeStyle = COLORS.graphEdge;
+  ctx.lineWidth = pixel;
+  ctx.stroke(paths.edges);
+  ctx.strokeStyle = COLORS.graphOutline;
+  ctx.lineWidth = 1.5 * pixel;
+  ctx.stroke(paths.outlines);
   ctx.fillStyle = COLORS.graphCorner;
-  ctx.beginPath();
-  for (const [x, y] of corners) {
-    ctx.moveTo(x + cornerSize, y);
-    ctx.arc(x, y, cornerSize, 0, Math.PI * 2);
-  }
-  ctx.fill();
+  ctx.fill(paths.corners);
 }
 
 // translucent backdrop with a border along its open edges, so text stays readable over the field

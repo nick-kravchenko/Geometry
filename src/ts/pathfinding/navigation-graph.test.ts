@@ -114,7 +114,8 @@ describe('traceOutlines', () => {
       0, 0, 1, 0,
       0, 0, 0, 0,
     ]);
-    const loops: number[][] = traceOutlines(grid, 4, 4);
+    const loops: number[][] = [];
+    traceOutlines(grid, 4, 4, (loop: number[]) => loops.push(loop));
     expect(loops.map((loop: number[]) => simplifyLoop(loop, .1).length / 2).sort()).toEqual([4, 4, 4]);
   });
 });

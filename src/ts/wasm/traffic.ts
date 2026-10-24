@@ -126,23 +126,3 @@ export function trafficShapes(traffic: Traffic, meter: number): TrafficShapes {
     }),
   };
 }
-
-// Blocks the pixels whose centers are inside a circle, recording them in stamped so they can be freed
-// again; pixels already blocked are left alone.
-export function stampCircles(grid: Uint8Array, w: number, h: number, circles: Circle[], stamped: number[]): void {
-  for (const [[cx, cy], r] of circles) {
-    for (let y: number = Math.max(0, Math.floor(cy - r)); y <= Math.min(h - 1, Math.ceil(cy + r)); y++) {
-      for (let x: number = Math.max(0, Math.floor(cx - r)); x <= Math.min(w - 1, Math.ceil(cx + r)); x++) {
-        const cell: number = y * w + x;
-        if (grid[cell] || (x + .5 - cx) ** 2 + (y + .5 - cy) ** 2 >= r * r) continue;
-        grid[cell] = 1;
-        stamped.push(cell);
-      }
-    }
-  }
-}
-
-export function unstamp(grid: Uint8Array, stamped: number[]): void {
-  for (const cell of stamped) grid[cell] = 0;
-  stamped.length = 0;
-}

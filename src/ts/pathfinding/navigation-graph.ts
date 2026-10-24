@@ -113,53 +113,50 @@ export function isSegmentClear(grid: Uint8Array, w: number, h: number, x0: numbe
 }
 
 // Outlines of the blocked regions as closed loops of pixel corners [x0, y0, x1, y1, ...], walked with
-// the obstacle on the left (y points down). Outside the grid counts as blocked.
-export function traceOutlines(grid: Uint8Array, w: number, h: number): number[][] {
+// the obstacle on the left (y points down), passed to visit one at a time. Outside the grid counts as
+// blocked. Walks each contour on the grid itself, keeping only a bit per horizontal pixel edge to know
+// which contours are done, so large grids need little memory.
+export function traceOutlines(grid: Uint8Array, w: number, h: number, visit: (loop: number[]) => void): void {
   const blocked = (x: number, y: number): boolean => x < 0 || y < 0 || x >= w || y >= h || grid[y * w + x] === 1;
-  const W: number = w + 1;
-  // up to two outgoing edges per pixel corner (two where obstacles touch diagonally): the target corner
-  const out: Int32Array = new Int32Array(W * (h + 1) * 2).fill(-1);
-  const add = (from: number, to: number): void => {
-    out[2 * from + (out[2 * from] === -1 ? 0 : 1)] = to;
+  // traced horizontal edges: bit y * w + x for the edge at the top of pixel (x, y), 0 <= y <= h
+  const done: Uint32Array = new Uint32Array(Math.ceil(w * (h + 1) / 32));
+  const mark = (x: number, y: number): void => {
+    const bit: number = y * w + x;
+    done[bit >>> 5] |= 1 << (bit & 31);
+  };
+  const isDone = (x: number, y: number): boolean => ((done[(y * w + x) >>> 5] >>> ((y * w + x) & 31)) & 1) === 1;
+  // edges leaving corner (x, y), with the obstacle on their left: [dx, dy] of each
+  const exits = (x: number, y: number): number[] => {
+    const upLeft: boolean = blocked(x - 1, y - 1), upRight: boolean = blocked(x, y - 1);
+    const downLeft: boolean = blocked(x - 1, y), downRight: boolean = blocked(x, y);
+    const out: number[] = [];
+    if (upRight && !downRight) out.push(1, 0); // east along the top of pixel (x, y)
+    if (downLeft && !upLeft) out.push(-1, 0); // west along the top of pixel (x - 1, y)
+    if (downRight && !downLeft) out.push(0, 1); // south along the left of pixel (x, y)
+    if (upLeft && !upRight) out.push(0, -1); // north along the left of pixel (x, y - 1)
+    return out;
   };
   for (let y: number = 0; y <= h; y++) {
-    for (let x: number = 0; x <= w; x++) {
-      const here: boolean = blocked(x, y);
-      if (x < w && here !== blocked(x, y - 1)) { // horizontal edge at the top of pixel (x, y)
-        if (here) add(y * W + x + 1, y * W + x); else add(y * W + x, y * W + x + 1);
-      }
-      if (y < h && here !== blocked(x - 1, y)) { // vertical edge at the left of pixel (x, y)
-        if (here) add(y * W + x, (y + 1) * W + x); else add((y + 1) * W + x, y * W + x);
-      }
-    }
-  }
-  const loops: number[][] = [];
-  for (let first: number = 0; first < W * (h + 1); first++) {
-    while (out[2 * first] !== -1 || out[2 * first + 1] !== -1) {
+    for (let x: number = 0; x < w; x++) {
+      if (blocked(x, y) === blocked(x, y - 1) || isDone(x, y)) continue;
+      // a contour not traced yet, through the top edge of pixel (x, y): west when the pixel is blocked
+      let [cx, cy, dx, dy] = blocked(x, y) ? [x + 1, y, -1, 0] : [x, y, 1, 0];
+      const [startX, startY, startDx] = [cx, cy, dx];
       const loop: number[] = [];
-      let corner: number = first, directionX: number = 0, directionY: number = 0;
-      for (;;) {
+      do {
+        loop.push(cx, cy);
+        if (dx !== 0) mark(dx > 0 ? cx : cx - 1, cy);
+        cx += dx;
+        cy += dy;
+        const out: number[] = exits(cx, cy);
         // where two edges leave a corner, turn left, towards the obstacle, so obstacles that only touch
         // diagonally get separate outlines
-        let slot: number = out[2 * corner] !== -1 ? 0 : 1;
-        if (out[2 * corner] !== -1 && out[2 * corner + 1] !== -1) {
-          const target: number = out[2 * corner];
-          const turnX: number = directionY, turnY: number = -directionX; // left of the current direction
-          slot = target % W - corner % W === turnX && ~~(target / W) - ~~(corner / W) === turnY ? 0 : 1;
-        }
-        const target: number = out[2 * corner + slot];
-        if (target === -1) break;
-        out[2 * corner + slot] = -1;
-        loop.push(corner % W, ~~(corner / W));
-        directionX = target % W - corner % W;
-        directionY = ~~(target / W) - ~~(corner / W);
-        corner = target;
-        if (corner === first) break; // closed
-      }
-      loops.push(loop);
+        const left: boolean = out.length > 2 && out[0] === dy && out[1] === -dx;
+        [dx, dy] = out.length > 2 && !left ? [out[2], out[3]] : [out[0], out[1]];
+      } while (cx !== startX || cy !== startY || dx !== startDx || dy !== 0);
+      visit(loop);
     }
   }
-  return loops;
 }
 
 // Douglas–Peucker on a closed loop: keeps the vertices needed to stay within tolerance of it.
@@ -207,6 +204,9 @@ const WALL_CELL: number = 32;
 const NODE_CELL: number = 64;
 // how far a temporary node around a moving obstacle looks for nodes to link to: 40 m on Kyiv
 const MOVING_REACH: number = 160;
+// the longest edge, and how far start and end look for nodes first: 200 m on Kyiv. Longer lines of sight
+// go through nodes on the way, at a small cost in length.
+const EDGE_REACH: number = 800;
 
 function bucketWalls(segments: number[], w: number, h: number): Walls {
   const columns: number = Math.ceil((w + 2) / WALL_CELL), rows: number = Math.ceil((h + 2) / WALL_CELL);
@@ -303,7 +303,7 @@ export function buildNavigationGraph(grid: Uint8Array, w: number, h: number, tol
   const segments: number[] = [];
   const x: number[] = [], y: number[] = [], cornerX: number[] = [], cornerY: number[] = [];
   const px: number[] = [], py: number[] = [], qx: number[] = [], qy: number[] = [];
-  for (const loop of traceOutlines(grid, w, h)) {
+  traceOutlines(grid, w, h, (loop: number[]) => {
     const outline: number[] = simplifyLoop(loop, tolerance);
     const n: number = outline.length / 2;
     outlines.push(Array.from({ length: n }, (_: unknown, i: number): Point => [outline[2 * i], outline[2 * i + 1]]));
@@ -336,19 +336,22 @@ export function buildNavigationGraph(grid: Uint8Array, w: number, h: number, tol
         break;
       }
     }
-  }
+  });
   const walls: Walls = bucketWalls(segments, w, h);
 
   const n: number = x.length;
+  const nodeCells: Buckets = bucket(Float64Array.from(x.flatMap((nodeX: number, i: number) => [nodeX, y[i], nodeX, y[i]])), w, h, NODE_CELL);
+  // pairs within EDGE_REACH of each other only, so large grids with many nodes build in seconds
   const neighbours: number[][] = Array.from({ length: n }, () => []);
   for (let a: number = 0; a < n; a++) {
-    for (let b: number = a + 1; b < n; b++) {
-      if (!wraps(cornerX[a], cornerY[a], px[a], py[a], qx[a], qy[a], x[b], y[b])) continue;
-      if (!wraps(cornerX[b], cornerY[b], px[b], py[b], qx[b], qy[b], x[a], y[a])) continue;
-      if (!isVisible(walls, x[a], y[a], x[b], y[b])) continue;
+    near(nodeCells, x[a] - EDGE_REACH, y[a] - EDGE_REACH, x[a] + EDGE_REACH, y[a] + EDGE_REACH, (b: number) => {
+      if (b <= a || (x[b] - x[a]) ** 2 + (y[b] - y[a]) ** 2 > EDGE_REACH ** 2) return;
+      if (!wraps(cornerX[a], cornerY[a], px[a], py[a], qx[a], qy[a], x[b], y[b])) return;
+      if (!wraps(cornerX[b], cornerY[b], px[b], py[b], qx[b], qy[b], x[a], y[a])) return;
+      if (!isVisible(walls, x[a], y[a], x[b], y[b])) return;
       neighbours[a].push(b);
       neighbours[b].push(a);
-    }
+    });
   }
   const offsets: Int32Array = new Int32Array(n + 1);
   for (let a: number = 0; a < n; a++) offsets[a + 1] = offsets[a] + neighbours[a].length;
@@ -373,7 +376,7 @@ export function buildNavigationGraph(grid: Uint8Array, w: number, h: number, tol
     targets,
     costs,
     walls,
-    nodeCells: bucket(Float64Array.from(x.flatMap((nodeX: number, i: number) => [nodeX, y[i], nodeX, y[i]])), w, h, NODE_CELL),
+    nodeCells,
     components: components(offsets, targets),
     outlines,
   };
@@ -539,7 +542,12 @@ export function navigationGraphSearch(
     }
   };
   const linkThrough = (px: number, py: number, cost: Float64Array, via: (Point | null)[]): Point[] => {
-    if (reach(cost, via, px, py, 0, null, 0, total)) return [];
+    // nodes within EDGE_REACH, then all of them if none of those
+    let linked: boolean = false;
+    near(nodeCells, px - EDGE_REACH, py - EDGE_REACH, px + EDGE_REACH, py + EDGE_REACH, (node: number) => {
+      linked = reachNode(cost, via, px, py, 0, null, node) || linked;
+    });
+    if (reach(cost, via, px, py, 0, null, n, total) || linked || reach(cost, via, px, py, 0, null, 0, n)) return [];
     const pushed: Point | null = pushOff(px, py);
     if (pushed && reach(cost, via, pushed[0], pushed[1], Math.hypot(pushed[0] - px, pushed[1] - py), pushed, 0, total)) return [pushed];
     const escapes: Point[] = [];
