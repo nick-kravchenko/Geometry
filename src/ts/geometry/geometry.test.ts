@@ -39,6 +39,13 @@ describe('distances', () => {
     expect(pointToRectangleDistance([15, 5], [[0, 0], 10, 10])).toBe(5);
     expect(pointToCircleDistance([10, 0], [[0, 0], 4])).toBe(6);
   });
+
+  it('distance is 0 inside a shape or on its edge', () => {
+    expect(pointToRectangleDistance([5, 5], [[0, 0], 10, 10])).toBe(0);
+    expect(pointToRectangleDistance([10, 5], [[0, 0], 10, 10])).toBe(0);
+    expect(pointToCircleDistance([1, 1], [[0, 0], 4])).toBe(0);
+    expect(pointToCircleDistance([4, 0], [[0, 0], 4])).toBe(0);
+  });
 });
 
 describe('collisions', () => {
@@ -47,6 +54,14 @@ describe('collisions', () => {
     expect(pointToRectangleCollision([5, 5], [[0, 0], 10, 10])).toBe(true);
     expect(pointToRectangleCollision([15, 5], [[0, 0], 10, 10])).toBe(false);
     expect(pointToCircleCollision([1, 1], [[0, 0], 2])).toBe(true);
+  });
+
+  it('points on the edge collide', () => {
+    expect(pointToRectangleCollision([0, 0], [[0, 0], 10, 10])).toBe(true); // corner
+    expect(pointToRectangleCollision([10, 5], [[0, 0], 10, 10])).toBe(true); // right edge
+    expect(pointToRectangleCollision([10.1, 5], [[0, 0], 10, 10])).toBe(false);
+    expect(pointToCircleCollision([2, 0], [[0, 0], 2])).toBe(true);
+    expect(pointToCircleCollision([2.1, 0], [[0, 0], 2])).toBe(false);
   });
 
   it('lineToLineCollisionPoint', () => {

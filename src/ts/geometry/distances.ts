@@ -1,5 +1,5 @@
 import { Circle, Line, Point, Rectangle } from './shapes';
-import { rectangleToLines } from './conversions';
+import { rectangleToLines, rectangleToSides } from './conversions';
 
 export function pointToPointDistance(point1: Point, point2: Point): number {
   const [x1, y1]: Point = point1;
@@ -41,6 +41,9 @@ export function pointToLineDistance(point: Point, line: Line): number {
 }
 
 export function pointToRectangleDistance(point: Point, rectangle: Rectangle): number {
+  const [x, y]: Point = point;
+  const { top, right, bottom, left }: { top: number, right: number, bottom: number, left: number } = rectangleToSides(rectangle);
+  if (x >= left && x <= right && y >= top && y <= bottom) return 0; // inside or on the edge
   const lines: [Line, Line, Line, Line] = rectangleToLines(rectangle);
   let distance: number = Infinity;
   for (const line of lines) {
@@ -52,5 +55,5 @@ export function pointToRectangleDistance(point: Point, rectangle: Rectangle): nu
 
 export function pointToCircleDistance(point: Point, circle: Circle): number {
   const [center, radius]: [Point, number] = circle;
-  return pointToPointDistance(point, center) - radius;
+  return Math.max(0, pointToPointDistance(point, center) - radius); // 0 inside or on the edge
 }

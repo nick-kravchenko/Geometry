@@ -20,13 +20,14 @@ export function pointToLineCollision(point: Point, line: Line, threshold: number
 export function pointToRectangleCollision(point: Point, rectangle: Rectangle): boolean {
   const [px, py]: Point = point;
   const [[rx, ry], width, height]: Rectangle = rectangle;
-  return (px > rx && px < rx + width)
-    && (py > ry && py < ry + height);
+  // points on the edge count, like touching rectangles in merges.ts
+  return (px >= rx && px <= rx + width)
+    && (py >= ry && py <= ry + height);
 }
 
 export function pointToCircleCollision(point: Point, circle: Circle): boolean {
   const [circleCenter, circleRadius]: [Point, number] = circle;
-  return pointToPointDistance(point, circleCenter) < circleRadius;
+  return pointToPointDistance(point, circleCenter) <= circleRadius; // points on the edge count
 }
 
 export function lineToLineCollisionPoint(line1: Line, line2: Line): Point | null {
