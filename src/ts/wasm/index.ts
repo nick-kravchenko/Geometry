@@ -14,15 +14,21 @@ import {
   visibilityGraph,
   visibilityGraphSearch,
 } from '../pathfinding';
+import { METERS_PER_PIXEL } from '../kyiv';
 import { CellMap, DEFAULT_SEED, MapDefinition, MAPS } from '../maps';
 import { clamp, getCoordinatesByMouseEvent } from '../utils';
 import { COLORS, wasmPathColor } from './palette';
 import { controlAt, GraphOverlay, LEGEND_FONT_SIZE, legendRowAt, PathLayer, render, View } from './render';
+import { createTraffic, stampCircles, stepTraffic, Traffic, trafficCircles, trafficShapes, unstamp } from './traffic';
 
 // weight of the newest frame in the timings shown in the legend; smooths frame-to-frame noise
 const SMOOTHING: number = .1;
 // closest zoom, in canvas pixels per grid pixel
 const MAX_SCALE: number = 16;
+// traffic on city maps
+const PEDESTRIANS: number = 200;
+const CARS: number = 40;
+const MOVER_RADIUS: number = .3; // meters: the one whose path is searched is a person too
 
 // Demo settings remembered between visits; the end point and a map's random layout are not,
 // they always start at their defaults.
@@ -33,6 +39,7 @@ interface Settings {
   diagonal: boolean,
   overlay: boolean, // visibility graph overlay
   uiHidden: boolean,
+  traffic: boolean, // pedestrians and cars on city maps
   hidden: string[], // labels of hidden algorithms
 }
 
@@ -44,10 +51,11 @@ function loadSettings(): Settings {
       diagonal: settings.diagonal === true,
       overlay: settings.overlay === true,
       uiHidden: settings.uiHidden === true,
+      traffic: settings.traffic !== false,
       hidden: Array.isArray(settings.hidden) ? settings.hidden.filter((label: unknown) => typeof label === 'string') : [],
     };
   } catch {
-    return { map: MAPS[0].name, diagonal: false, overlay: false, uiHidden: false, hidden: [] }; // storage blocked or unreadable: use the defaults
+    return { map: MAPS[0].name, diagonal: false, overlay: false, uiHidden: false, traffic: true, hidden: [] }; // storage blocked or unreadable: use the defaults
   }
 }
 
@@ -97,7 +105,14 @@ function start(module: typeof import('pkg')): void {
   // zoom 1 fits the grid in the canvas; center is the grid point in the middle of the canvas
   let zoom: number = 1;
   let center: Point;
+  // the map's obstacles, and the grid the grid searches read: a copy with the traffic stamped in on city
+  // maps, the same array elsewhere
+  let staticGrid: Uint8Array;
   let grid: Uint8Array;
+  let traffic: Traffic | null;
+  let movingCircles: Circle[] = []; // the traffic as obstacles, this frame
+  let movingFlat: Float64Array = new Float64Array(0); // the same as [x, y, radius, ...], for WASM
+  const stamped: number[] = [], wasmStamped: number[] = [];
   let from: number;
   let end: number;
   let endCoordinates: Point;
@@ -117,7 +132,13 @@ function start(module: typeof import('pkg')): void {
     ({ w, h } = field);
     zoom = 1;
     center = [w / 2, h / 2];
-    grid = field.blockedCellsUint8Array;
+    staticGrid = field.blockedCellsUint8Array;
+    grid = field.city ? staticGrid.slice() : staticGrid;
+    traffic = null;
+    movingCircles = [];
+    movingFlat = new Float64Array(0);
+    stamped.length = 0;
+    wasmStamped.length = 0;
     from = field.startPointNumber;
     end = field.endPointNumber;
     endCoordinates = field.endPointCoordinates;
@@ -162,7 +183,12 @@ function start(module: typeof import('pkg')): void {
   const diagonalOnly: Availability = (diagonal: boolean): string | null => (!diagonal ? 'diagonal only' : null);
   // the outlines may cut into obstacles by the tolerance, so it stays within the padding
   const tolerance = (): number => Math.min(1.5, Math.max(1, field.padding));
-  const navigationGraph = (): NavigationGraph => navigation ??= buildNavigationGraph(grid, w, h, tolerance());
+  // both built from the map without traffic
+  const navigationGraph = (): NavigationGraph => navigation ??= buildNavigationGraph(staticGrid, w, h, tolerance());
+  const buildWasmNavigation = (): void => {
+    if (!wasmNavigation) wasm().build_navigation_graph(tolerance());
+    wasmNavigation = true;
+  };
   const pixelCenter = ([x, y]: Point): Point => [x + .5, y + .5];
 
   // label, color, path width, search, when the algorithm can run, and whether it is fast enough to
@@ -202,14 +228,14 @@ function start(module: typeof import('pkg')): void {
     ['[TS] Circle visibility graph', COLORS.visibilityGraph, 2, (): SearchResult => ({
       points: circleVisibilityGraphSearch(paddedCircles(), field.startPointCoordinates, endCoordinates),
     }), circleVisibilityGraph],
+    // around the traffic as it is this frame
     ['[WASM] Navigation graph', wasmPathColor(COLORS.navigation), 6, (): SearchResult => {
-      if (!wasmNavigation) wasm().build_navigation_graph(tolerance());
-      wasmNavigation = true;
+      buildWasmNavigation();
       const [startX, startY] = pixelCenter(field.startPointCoordinates), [endX, endY] = pixelCenter(endCoordinates);
-      return { points: toPoints(wasm().navigation_graph_search(startX, startY, endX, endY)) };
+      return { points: toPoints(wasm().navigation_graph_search(startX, startY, endX, endY, movingFlat)) };
     }, diagonalOnly, true],
     ['[TS] Navigation graph', COLORS.navigation, 2, (): SearchResult => ({
-      points: navigationGraphSearch(navigationGraph(), grid, w, h, pixelCenter(field.startPointCoordinates), pixelCenter(endCoordinates)),
+      points: navigationGraphSearch(navigationGraph(), staticGrid, w, h, pixelCenter(field.startPointCoordinates), pixelCenter(endCoordinates), movingCircles),
     }), diagonalOnly, true],
   ];
   const layers: PathLayer[] = algorithms.map(([label, color, size]): PathLayer => ({
@@ -228,12 +254,14 @@ function start(module: typeof import('pkg')): void {
     diagonal,
     overlay,
     uiHidden,
+    traffic: trafficOn,
     hidden: layers.filter(({ visible }: PathLayer) => !visible).map(({ label }: PathLayer) => label),
   });
 
   let diagonal: boolean = settings.diagonal;
   let overlay: boolean = settings.overlay;
   let uiHidden: boolean = settings.uiHidden;
+  let trafficOn: boolean = settings.traffic;
   updateAvailability();
   // the overlay shows the graph the visibility graph searches, so only while that algorithm runs; on city
   // maps, where it does not, the navigation graph: simplified outlines, nodes and edges
@@ -270,7 +298,7 @@ function start(module: typeof import('pkg')): void {
   // they search only when the end point, the mode, the map or the shown algorithms change.
   let searched: string = '';
   function search(): void {
-    const state: string = [mapIndex, seed, end, diagonal, ...layers.map(({ visible }: PathLayer) => visible)].join();
+    const state: string = [mapIndex, seed, end, diagonal, trafficOn, ...layers.map(({ visible }: PathLayer) => visible)].join();
     const unchanged: boolean = isCityMap() && state === searched;
     searched = state;
     algorithms.forEach(([, , , run, , realTime]: Algorithm, i: number) => {
@@ -296,10 +324,46 @@ function start(module: typeof import('pkg')): void {
     fps = `${frameTimes.length} FPS · ${frameTime.toFixed(1)} ms/frame`;
   }
 
+  // Moves the traffic on city maps and stamps it into the grids. Pedestrians are routed on the grid
+  // without traffic, so the stamps come off first, and the navigation graphs are built before any.
+  const meter = (): number => 1 / METERS_PER_PIXEL;
+  const freeSpot = (): Point => {
+    for (;;) {
+      const cell: number = ~~(Math.random() * w * h);
+      if (!staticGrid[cell]) return [cell % w + .5, ~~(cell / w) + .5];
+    }
+  };
+  const route = ([fromX, fromY]: Point, [toX, toY]: Point): Point[] => toPoints(wasm().navigation_graph_search(fromX, fromY, toX, toY, new Float64Array(0)));
+  let lastFrame: number = NaN;
+  function moveTraffic(now: number): void {
+    const seconds: number = Number.isNaN(lastFrame) ? 0 : Math.min(.1, (now - lastFrame) / 1000);
+    lastFrame = now;
+    const wasmGrid = (): Uint8Array => new Uint8Array(wasm_memory().buffer, wasm().cells_ptr(), w * h);
+    unstamp(grid, stamped);
+    unstamp(wasmGrid(), wasmStamped);
+    if (!field.city || !trafficOn) {
+      movingCircles = [];
+      movingFlat = new Float64Array(0);
+      return;
+    }
+    buildWasmNavigation();
+    traffic ??= createTraffic(field.city, staticGrid, w, h, meter(), PEDESTRIANS, CARS);
+    stepTraffic(traffic, seconds, meter(), route, freeSpot);
+    movingCircles = trafficCircles(traffic, meter(), MOVER_RADIUS);
+    movingFlat = new Float64Array(movingCircles.flatMap(([[x, y], radius]: Circle) => [x, y, radius]));
+    stampCircles(grid, w, h, movingCircles, stamped);
+    stampCircles(wasmGrid(), w, h, movingCircles, wasmStamped);
+  }
+
   function frame(now: number): void {
+    moveTraffic(now);
     search();
-    const controls = { fps, diagonal, overlay, overlayAvailable: diagonal, map: MAPS[mapIndex].name, procedural: MAPS[mapIndex].procedural, uiHidden };
-    render(ctx, canvasW, canvasH, field, endCoordinates, layers, controls, graphOverlay(), view());
+    const controls = {
+      fps, diagonal, overlay, overlayAvailable: diagonal, traffic: trafficOn, trafficAvailable: isCityMap(),
+      map: MAPS[mapIndex].name, procedural: MAPS[mapIndex].procedural, uiHidden,
+    };
+    const shapes = traffic && trafficOn && field.city ? trafficShapes(traffic, meter()) : null;
+    render(ctx, canvasW, canvasH, field, endCoordinates, layers, controls, graphOverlay(), view(), shapes);
     updateFps(now);
     requestAnimationFrame(frame);
   }
@@ -396,6 +460,11 @@ function start(module: typeof import('pkg')): void {
     uiHidden = !uiHidden;
     save();
   };
+  const toggleTraffic = (): void => {
+    if (!isCityMap()) return;
+    trafficOn = !trafficOn;
+    save();
+  };
   window.addEventListener('keydown', (event: KeyboardEvent) => {
     const key: string = event.key.toLowerCase();
     if (key === 'd') toggleDiagonal();
@@ -403,6 +472,7 @@ function start(module: typeof import('pkg')): void {
     if (key === 'm') nextMap();
     if (key === 'r') newLayout();
     if (key === 'h') toggleUi();
+    if (key === 't') toggleTraffic();
     if (key === '0') resetView();
   });
 
@@ -446,6 +516,7 @@ function start(module: typeof import('pkg')): void {
     if (control === 'map') nextMap();
     if (control === 'layout') newLayout();
     if (control === 'ui') toggleUi();
+    if (control === 'traffic') toggleTraffic();
     if (control) return;
     const row: number = uiHidden ? -1 : legendRowAt(ctx, fontSize, layers, point);
     if (row !== -1) {

@@ -22,6 +22,7 @@ All UI is drawn on the canvas:
 - **Controls** (top right): frames per second, and the **Diagonal** toggle (or press `D`), which switches BFS, A* and JPS (TS and WASM) to 8-directional movement. The visibility graphs move at any angle, so they only run with Diagonal on; without it, their rows show `diagonal only`. On circle maps the pixel visibility graph is off (`not on circle maps`): a circle's pixel edge is a staircase of thousands of corners, which slows it to hundreds of milliseconds; the circle visibility graph takes its place. With Diagonal on, **Graph overlay** (or press `G`) draws the graph the visibility graph searches: obstacle outlines, corner nodes, and edges between nodes that can be part of a shortest path. On circle maps it shows the circle visibility graph instead: padded circles, tangent points and tangent segments.
 - **Map** (`M`) cycles through Spiral, Maze, Rooms, Scatter, Cave, Asteroids, Pillars, Blobs (clusters of overlapping circles) and Kyiv; **New layout** (`R`) generates another layout of the current map (Maze, Rooms, Scatter, Cave, Asteroids and Blobs are generated from a seed, and always start from the same one). Every map keeps start and end connected.
 - **Kyiv**: central Kyiv around Bessarabsky Market (Besarabska Square 2) from [OpenStreetMap](https://www.openstreetmap.org/copyright), 972 m across at 0.25 m per pixel, so start and end are people: the grid is 3888×3888 and drawn scaled down (zoom in to see them). Buildings, walls, fences and car roads (lanes × 3.5 m wide) are obstacles; marked crossings and underpasses cut walkable strips through the roads; every obstacle is padded by a person's radius (0.3 m). With 16 times the pixels, grid searches take tens to hundreds of milliseconds, so on Kyiv they run only when the end point, the mode or the shown algorithms change, not every frame; the navigation graph still searches every frame (about 4 ms in WASM, 5 ms in TS, against 40 ms for WASM JPS). With Graph overlay on, Kyiv shows the navigation graph. The pixel visibility graph is off there (`not on city maps`): slanted walls are pixel staircases, and it takes seconds. `node scripts/fetch-kyiv.mjs` downloads the data again into `src/ts/data/kyiv.json`.
+- **Traffic** (`T`, city maps): 200 pedestrians walk between random spots and 40 cars drive along the roads, turning back at a road's end, blocking crossings as they pass. They are moving obstacles: the navigation graph routes around them every frame, and they are stamped into the grid for the grid searches (which on Kyiv only search again when something else changes, so their paths may run through traffic that has moved since).
 - **Hide UI** (`H`) hides the legend and controls when they cover the map; a small button brings them back.
 
 Colors come from the [Ocean Sunset](https://coolors.co/001219-005f73-0a9396-94d2bd-e9d8a6-ee9b00-ca6702-bb3e03-ae2012-9b2226) palette by Coolors, one hue per algorithm: each WASM path is drawn wide and translucent under its thin TS twin.
@@ -78,6 +79,7 @@ src/
     wasm/
       index.ts                  # Loads WASM module, frame loop, input (drag, legend, controls)
       render.ts                 # Canvas rendering: field, paths, legend, controls panel
+      traffic.ts                # Pedestrians and cars moving on city maps
       palette.ts                # Colors (Coolors "Ocean Sunset" palette)
     utils/                      # Helpers: clamp, debounce, coordinate conversion, batched cell fill
     maps.ts                     # Demo maps: spiral, maze, rooms, scatter, cave, asteroids, pillars
@@ -201,11 +203,13 @@ On the demo's circle maps (`?benchmark`, median) it takes about 2 ms (Asteroids,
 
 Any-angle paths on large grids in milliseconds, for searching every frame. The pixel visibility graph turns every pixel corner into a node, so slanted or curved walls (pixel staircases) give it hundreds of thousands of nodes. Here the obstacles are traced and simplified (Douglas–Peucker) to within `tolerance` pixels, and only the convex corners of the outlines become nodes, just off them in free space. Two nodes are linked when the segment between them wraps around both corners and crosses no outline: lines of sight are tested against the outlines, bucketed into 32-pixel cells, not against pixels, so staircases along slanted walls do not block them. The graph is built once per grid; a search links start and end to the nodes they see (through an escape point a few pixels away when a point pressed against a wall sees none) and runs A*.
 
+Moving obstacles: pass circles (grown by the mover's radius) to a search, and the graph stays as built. A segment the search tests that cuts into a circle is blocked, and that circle comes into play: it gets eight temporary nodes, the corners of an octagon around it, linked to start, end and the nodes within 40 m that see them. Circles nothing runs into cost only a bucket lookup, so a search around 200 pedestrians and 40 cars on Kyiv takes about 1.5 ms in WASM and 2 ms in TS. Nodes the search finished before a circle came into play do not link to it, so a path can come out a little longer than the shortest. Start and end that see different parts of the graph past the walls return no path at once.
+
 Paths may cut into obstacles by up to `tolerance` pixels, so keep it within the padding around them (the demo uses 1.5 px, 1.2 px on Kyiv), and passages only a few pixels wide may be missed. On Kyiv the graph has about 5,800 nodes and builds in 0.4–0.6 s; paths come out about 5% shorter than diagonal grid paths, as they move at any angle.
 
 ```ts
 const graph = buildNavigationGraph(blockedCells, w, h, tolerance?): NavigationGraph
-navigationGraphSearch(graph, blockedCells, w, h, start, end): Point[] // start, end in pixel coordinates
+navigationGraphSearch(graph, blockedCells, w, h, start, end, circles?): Point[] // pixel coordinates; circles move
 ```
 
 ### WASM — Rust (`Pathfinder`)
@@ -222,7 +226,7 @@ pathfinder.jump_point_search(start, end, diagonal): Uint32Array
 pathfinder.visibility_graph_search(start, end): Float64Array // waypoints [x0, y0, x1, y1, ...]
 pathfinder.circle_visibility_graph_search(circles, startX, startY, endX, endY, maxStep): Float64Array
 pathfinder.build_navigation_graph(tolerance): number // from the grid as it is now; returns the node count
-pathfinder.navigation_graph_search(startX, startY, endX, endY): Float64Array // empty before a build
+pathfinder.navigation_graph_search(startX, startY, endX, endY, circles): Float64Array // circles as [x, y, radius, ...]; empty before a build
 // circles as [x, y, radius, ...]; independent of the grid
 pathfinder.set_cells(blockedCells) // alternative: copy a whole grid in
 ```

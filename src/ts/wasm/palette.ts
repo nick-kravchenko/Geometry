@@ -26,6 +26,8 @@ export const COLORS = {
   road: withAlpha(PALETTE.midnightGreen, .3),
   crossing: withAlpha(PALETTE.vanilla, .3),
   barrier: withAlpha(PALETTE.tiffanyBlue, .7),
+  pedestrian: PALETTE.tiffanyBlue,
+  car: withAlpha(PALETTE.gamboge, .85),
   start: PALETTE.darkCyan,
   end: PALETTE.rufous,
   marker: PALETTE.vanilla,

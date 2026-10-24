@@ -115,12 +115,14 @@ impl Pathfinder {
         nodes
     }
 
-    // Shortest path at any angle on the navigation graph, between points in pixel coordinates, as
-    // [x0, y0, x1, y1, ...]; empty without a path or before build_navigation_graph. See NavigationGraph.
-    pub fn navigation_graph_search(&mut self, start_x: f64, start_y: f64, end_x: f64, end_y: f64) -> Vec<f64> {
+    // Shortest path at any angle on the navigation graph, between points in pixel coordinates, around
+    // moving circles given as [x, y, radius, ...] (grown by the mover's radius), as [x0, y0, x1, y1, ...];
+    // empty without a path or before build_navigation_graph. See NavigationGraph.
+    pub fn navigation_graph_search(&mut self, start_x: f64, start_y: f64, end_x: f64, end_y: f64, circles: &[f64]) -> Vec<f64> {
         let (cells, w, h) = (&self.cells, self.w, self.h);
+        let circles: Vec<Circle> = circles.as_chunks::<3>().0.iter().map(|c| (c[0], c[1], c[2])).collect();
         match &mut self.navigation_graph {
-            Some(graph) => graph.search(cells, w, h, (start_x, start_y), (end_x, end_y)),
+            Some(graph) => graph.search(cells, w, h, (start_x, start_y), (end_x, end_y), &circles),
             None => Vec::new(),
         }
     }

@@ -1,4 +1,4 @@
-import { Point } from '../geometry';
+import { Circle, Point } from '../geometry';
 
 // A visibility graph over simplified obstacle outlines, built once per grid, for paths at any angle
 // in a few milliseconds even on large grids. The pixel visibility graph uses every pixel corner as a
@@ -23,7 +23,49 @@ export interface NavigationGraph {
   targets: Int32Array,
   costs: Float64Array,
   walls: Walls,
+  nodeCells: Buckets, // the nodes, bucketed, to find the ones near a point
+  components: Int32Array, // per node, its connected component, so a search between two can stop at once
   outlines: Point[][], // simplified obstacle outlines, for display
+}
+
+// Items bucketed into square cells by their bounding boxes.
+export interface Buckets {
+  cellSize: number,
+  columns: number,
+  rows: number,
+  offsets: Int32Array, // items in cell c: indices[offsets[c]] to indices[offsets[c + 1] - 1]
+  indices: Int32Array,
+}
+
+// Buckets items given by bounding boxes [minX, minY, maxX, maxY, ...], clamped to the grid.
+function bucket(boxes: ArrayLike<number>, w: number, h: number, cellSize: number): Buckets {
+  const columns: number = Math.ceil((w + 2) / cellSize), rows: number = Math.ceil((h + 2) / cellSize);
+  const cell = (v: number, count: number): number => Math.max(0, Math.min(count - 1, Math.floor((v + 1) / cellSize)));
+  const counts: Int32Array = new Int32Array(columns * rows + 1);
+  const visit = (item: number, add: (c: number) => void): void => {
+    for (let row: number = cell(boxes[4 * item + 1], rows); row <= cell(boxes[4 * item + 3], rows); row++) {
+      for (let column: number = cell(boxes[4 * item], columns); column <= cell(boxes[4 * item + 2], columns); column++) add(row * columns + column);
+    }
+  };
+  const items: number = boxes.length / 4;
+  for (let item: number = 0; item < items; item++) visit(item, (c: number) => counts[c + 1]++);
+  const offsets: Int32Array = new Int32Array(columns * rows + 1);
+  for (let c: number = 0; c < columns * rows; c++) offsets[c + 1] = offsets[c] + counts[c + 1];
+  const fill: Int32Array = offsets.slice(0, -1);
+  const indices: Int32Array = new Int32Array(offsets[columns * rows]);
+  for (let item: number = 0; item < items; item++) visit(item, (c: number) => { indices[fill[c]++] = item; });
+  return { cellSize, columns, rows, offsets, indices };
+}
+
+// Calls visit for every item in the cells overlapping the box; an item may come up more than once.
+function near({ cellSize, columns, rows, offsets, indices }: Buckets, minX: number, minY: number, maxX: number, maxY: number, visit: (item: number) => void): void {
+  const cell = (v: number, count: number): number => Math.max(0, Math.min(count - 1, Math.floor((v + 1) / cellSize)));
+  for (let row: number = cell(minY, rows); row <= cell(maxY, rows); row++) {
+    for (let column: number = cell(minX, columns); column <= cell(maxX, columns); column++) {
+      const c: number = row * columns + column;
+      for (let k: number = offsets[c]; k < offsets[c + 1]; k++) visit(indices[k]);
+    }
+  }
 }
 
 // The outline segments, bucketed into square cells for line-of-sight tests.
@@ -162,6 +204,9 @@ function wraps(x: number, y: number, px: number, py: number, qx: number, qy: num
 }
 
 const WALL_CELL: number = 32;
+const NODE_CELL: number = 64;
+// how far a temporary node around a moving obstacle looks for nodes to link to: 40 m on Kyiv
+const MOVING_REACH: number = 160;
 
 function bucketWalls(segments: number[], w: number, h: number): Walls {
   const columns: number = Math.ceil((w + 2) / WALL_CELL), rows: number = Math.ceil((h + 2) / WALL_CELL);
@@ -185,27 +230,23 @@ function bucketWalls(segments: number[], w: number, h: number): Walls {
   };
 }
 
-// Whether the segment from (x0, y0) to (x1, y1) crosses no wall: walks the cells along it and tests
-// the walls in each, every wall once.
+// Whether the segment from (x0, y0) to (x1, y1) crosses no wall: walks the cells along it from (x0, y0)
+// (Amanatides–Woo), testing the walls in each, every wall once, so a segment blocked near its start
+// stops early.
 export function isVisible(walls: Walls, x0: number, y0: number, x1: number, y1: number): boolean {
   const { segments, cellSize, columns, rows, offsets, indices, seen } = walls;
   const test: number = ++walls.test[0];
   const dx: number = x1 - x0, dy: number = y1 - y0;
-  // cells of the segment's bounding box row by row, limited to the columns the segment spans in that row
-  const fromRow: number = Math.max(0, Math.floor((Math.min(y0, y1) + 1) / cellSize));
-  const toRow: number = Math.min(rows - 1, Math.floor((Math.max(y0, y1) + 1) / cellSize));
-  for (let row: number = fromRow; row <= toRow; row++) {
-    // the segment's x range within this row's band of y
-    let low: number = Math.min(x0, x1), high: number = Math.max(x0, x1);
-    if (dy !== 0) {
-      const top: number = row * cellSize - 1, bottom: number = top + cellSize;
-      const t0: number = Math.max(0, Math.min(1, (top - y0) / dy)), t1: number = Math.max(0, Math.min(1, (bottom - y0) / dy));
-      low = x0 + dx * Math.min(t0, t1);
-      high = x0 + dx * Math.max(t0, t1);
-      if (low > high) [low, high] = [high, low];
-    }
-    const fromColumn: number = Math.max(0, Math.floor((low + 1) / cellSize)), toColumn: number = Math.min(columns - 1, Math.floor((high + 1) / cellSize));
-    for (let column: number = fromColumn; column <= toColumn; column++) {
+  // cell coordinates are shifted by a pixel, so the grid's -1 border falls in the first cell
+  const cx0: number = (x0 + 1) / cellSize, cy0: number = (y0 + 1) / cellSize;
+  let column: number = Math.floor(cx0), row: number = Math.floor(cy0);
+  const endColumn: number = Math.floor((x1 + 1) / cellSize), endRow: number = Math.floor((y1 + 1) / cellSize);
+  const stepX: number = dx > 0 ? 1 : -1, stepY: number = dy > 0 ? 1 : -1;
+  const deltaX: number = dx === 0 ? Infinity : Math.abs(cellSize / dx), deltaY: number = dy === 0 ? Infinity : Math.abs(cellSize / dy);
+  let nextX: number = dx > 0 ? (column + 1 - cx0) * cellSize / dx : dx < 0 ? (column - cx0) * cellSize / dx : Infinity;
+  let nextY: number = dy > 0 ? (row + 1 - cy0) * cellSize / dy : dy < 0 ? (row - cy0) * cellSize / dy : Infinity;
+  for (let steps: number = Math.abs(endColumn - column) + Math.abs(endRow - row); steps >= 0; steps--) {
+    if (column >= 0 && row >= 0 && column < columns && row < rows) {
       const c: number = row * columns + column;
       for (let k: number = offsets[c]; k < offsets[c + 1]; k++) {
         const wall: number = indices[k];
@@ -223,8 +264,38 @@ export function isVisible(walls: Walls, x0: number, y0: number, x1: number, y1: 
         return false;
       }
     }
+    if (nextX < nextY) {
+      column += stepX;
+      nextX += deltaX;
+    } else {
+      row += stepY;
+      nextY += deltaY;
+    }
   }
   return true;
+}
+
+// Connected components of the graph: the component of each node.
+function components(offsets: Int32Array, targets: Int32Array): Int32Array {
+  const n: number = offsets.length - 1;
+  const component: Int32Array = new Int32Array(n).fill(-1);
+  const stack: number[] = [];
+  for (let first: number = 0, label: number = 0; first < n; first++) {
+    if (component[first] !== -1) continue;
+    component[first] = label;
+    stack.push(first);
+    while (stack.length > 0) {
+      const node: number = stack.pop() as number;
+      for (let k: number = offsets[node]; k < offsets[node + 1]; k++) {
+        if (component[targets[k]] === -1) {
+          component[targets[k]] = label;
+          stack.push(targets[k]);
+        }
+      }
+    }
+    label++;
+  }
+  return component;
 }
 
 export function buildNavigationGraph(grid: Uint8Array, w: number, h: number, tolerance: number = 1.5): NavigationGraph {
@@ -302,55 +373,199 @@ export function buildNavigationGraph(grid: Uint8Array, w: number, h: number, tol
     targets,
     costs,
     walls,
+    nodeCells: bucket(Float64Array.from(x.flatMap((nodeX: number, i: number) => [nodeX, y[i], nodeX, y[i]])), w, h, NODE_CELL),
+    components: components(offsets, targets),
     outlines,
   };
 }
 
+// The first circle the segment cuts into, or -1. Circles are bucketed by their bounding boxes.
+function blockingCircle(circles: Circle[], cells: Buckets, seen: Int32Array, test: number, x0: number, y0: number, x1: number, y1: number): number {
+  const dx: number = x1 - x0, dy: number = y1 - y0;
+  const lengthSquared: number = dx * dx + dy * dy;
+  let blocking: number = -1;
+  near(cells, Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1), (circle: number) => {
+    if (blocking !== -1 || seen[circle] === test) return;
+    seen[circle] = test;
+    const [[cx, cy], radius] = circles[circle];
+    const t: number = lengthSquared === 0 ? 0 : Math.max(0, Math.min(1, ((cx - x0) * dx + (cy - y0) * dy) / lengthSquared));
+    const ex: number = x0 + t * dx - cx, ey: number = y0 + t * dy - cy;
+    if (ex * ex + ey * ey < radius * radius) blocking = circle;
+  });
+  return blocking;
+}
+
 // Shortest path on the graph from start to end (pixel coordinates, on free pixels), as waypoints.
 // Start and end are linked to the nodes they can see; A* runs on the rest. Empty when there is no path.
-export function navigationGraphSearch(graph: NavigationGraph, grid: Uint8Array, w: number, h: number, start: Point, end: Point): Point[] {
+//
+// circles are moving obstacles, already grown by the mover's radius; the graph stays as built. A segment
+// the search tests that cuts into a circle is blocked, and the circle comes into play: it gets eight
+// temporary nodes, the corners of an octagon around it, linked to start, end and the nodes within
+// MOVING_REACH that see them, so paths go around it. Circles nothing runs into cost nothing beyond a
+// bucket lookup. Nodes the search finished before a circle came into play do not link to its nodes, so
+// a path can come out a little longer than the shortest.
+export function navigationGraphSearch(
+  graph: NavigationGraph, grid: Uint8Array, w: number, h: number, start: Point, end: Point, circles: Circle[] = [],
+): Point[] {
   const [startX, startY] = start, [endX, endY] = end;
+  const inCircle = (px: number, py: number): boolean => circles.some(([[cx, cy], r]: Circle) => (px - cx) ** 2 + (py - cy) ** 2 < r * r);
   if (!isSegmentClear(grid, w, h, startX, startY, startX, startY) || !isSegmentClear(grid, w, h, endX, endY, endX, endY)) return [];
-  const { x, y, cornerX, cornerY, previousX, previousY, nextX, nextY, offsets, targets, costs, walls } = graph;
-  if (isVisible(walls, startX, startY, endX, endY) || isSegmentClear(grid, w, h, startX, startY, endX, endY)) return [start, end];
+  if (inCircle(startX, startY) || inCircle(endX, endY)) return [];
+  const { walls, nodeCells, offsets, targets, costs } = graph;
+  const n: number = graph.x.length, capacity: number = n + 8 * circles.length;
 
-  const n: number = x.length;
-  const visible = (node: number, tx: number, ty: number): boolean => (
-    wraps(cornerX[node], cornerY[node], previousX[node], previousY[node], nextX[node], nextY[node], tx, ty)
-    && isVisible(walls, tx, ty, x[node], y[node])
-  );
-  // The nodes a point links to, with the length of each link. A point within the tolerance of a wall
-  // may be inside its outline and see no node. It then links through an escape point a few pixels away,
-  // reached over free pixels, kept in via for the path.
-  const link = ([px, py]: Point): [Float64Array, (Point | null)[]] => {
-    const cost: Float64Array = new Float64Array(n).fill(Infinity);
-    const via: (Point | null)[] = new Array(n).fill(null);
-    let linked: boolean = false;
-    const reach = (ex: number, ey: number, extra: number, escape: Point | null): void => {
-      for (let node: number = 0; node < n; node++) {
-        const distance: number = extra + Math.hypot(x[node] - ex, y[node] - ey);
-        if (distance >= cost[node] || !visible(node, ex, ey)) continue;
-        cost[node] = distance;
-        via[node] = escape;
-        linked = true;
-      }
-    };
-    reach(px, py, 0, null);
-    for (const radius of [2, 4, 8]) {
-      if (linked) break;
-      for (let k: number = 0; k < 16; k++) {
-        const ex: number = px + radius * Math.cos(k * Math.PI / 8), ey: number = py + radius * Math.sin(k * Math.PI / 8);
-        if (isSegmentClear(grid, w, h, px, py, ex, ey)) reach(ex, ey, radius, [ex, ey]);
+  // nodes: the graph's, then the temporary ones as circles come into play
+  const x: Float64Array = new Float64Array(capacity), y: Float64Array = new Float64Array(capacity);
+  const cornerX: Float64Array = new Float64Array(capacity), cornerY: Float64Array = new Float64Array(capacity);
+  const previousX: Float64Array = new Float64Array(capacity), previousY: Float64Array = new Float64Array(capacity);
+  const nextX: Float64Array = new Float64Array(capacity), nextY: Float64Array = new Float64Array(capacity);
+  x.set(graph.x);
+  y.set(graph.y);
+  cornerX.set(graph.cornerX);
+  cornerY.set(graph.cornerY);
+  previousX.set(graph.previousX);
+  previousY.set(graph.previousY);
+  nextX.set(graph.nextX);
+  nextY.set(graph.nextY);
+  let total: number = n;
+  const circleCells: Buckets = bucket(Float64Array.from(circles.flatMap(([[cx, cy], r]: Circle) => [cx - r, cy - r, cx + r, cy + r])), w, h, WALL_CELL);
+  const seen: Int32Array = new Int32Array(circles.length);
+  const active: Uint8Array = new Uint8Array(circles.length);
+  let test: number = 0;
+  const pending: number[] = []; // temporary nodes not yet linked to start and end
+  const corner: number = Math.PI / 4;
+  // octagon corners around the circle, half a pixel out where free; its edges stay clear of the circle
+  const activate = (circle: number): void => {
+    if (active[circle]) return;
+    active[circle] = 1;
+    const [[cx, cy], r] = circles[circle];
+    const radius: number = r / Math.cos(corner / 2);
+    const vertex = (k: number): Point => [cx + radius * Math.cos(k * corner), cy + radius * Math.sin(k * corner)];
+    for (let k: number = 0; k < 8; k++) {
+      const nx: number = cx + (radius + .5) * Math.cos(k * corner), ny: number = cy + (radius + .5) * Math.sin(k * corner);
+      if (nx < 0 || ny < 0 || nx >= w || ny >= h || grid[Math.floor(ny) * w + Math.floor(nx)] === 1 || inCircle(nx, ny)) continue;
+      [cornerX[total], cornerY[total]] = vertex(k);
+      [previousX[total], previousY[total]] = vertex(k - 1);
+      [nextX[total], nextY[total]] = vertex(k + 1);
+      x[total] = nx;
+      y[total] = ny;
+      pending.push(total++);
+    }
+  };
+  // Whether the segment misses every circle; a circle in the way comes into play.
+  const missesCircles = (x0: number, y0: number, x1: number, y1: number): boolean => {
+    if (circles.length === 0) return true;
+    const circle: number = blockingCircle(circles, circleCells, seen, ++test, x0, y0, x1, y1);
+    if (circle !== -1) activate(circle);
+    return circle === -1;
+  };
+  // whether the segment crosses no outline and no circle
+  const clear = (x0: number, y0: number, x1: number, y1: number): boolean => isVisible(walls, x0, y0, x1, y1) && missesCircles(x0, y0, x1, y1);
+  if (isVisible(walls, startX, startY, endX, endY) || isSegmentClear(grid, w, h, startX, startY, endX, endY)) {
+    const circle: number = circles.length === 0 ? -1 : blockingCircle(circles, circleCells, seen, ++test, startX, startY, endX, endY);
+    if (circle === -1) return [start, end];
+    activate(circle);
+  }
+
+  const wrapsAt = (node: number, tx: number, ty: number): boolean => wraps(cornerX[node], cornerY[node], previousX[node], previousY[node], nextX[node], nextY[node], tx, ty);
+  const visible = (node: number, tx: number, ty: number): boolean => wrapsAt(node, tx, ty) && clear(tx, ty, x[node], y[node]);
+  const toEnd: Float64Array = new Float64Array(capacity).fill(Infinity);
+  const fromStart: Float64Array = new Float64Array(capacity).fill(Infinity);
+  const endVia: (Point | null)[] = new Array(capacity).fill(null), startVia: (Point | null)[] = new Array(capacity).fill(null);
+  // Links a point to the nodes from..to it sees, through an escape point extra pixels away if given.
+  // seen collects the components of the graph's nodes the point sees past the walls, circles or not
+  let seen_: Set<number> | null = null;
+  const reachNode = (cost: Float64Array, via: (Point | null)[], ex: number, ey: number, extra: number, escape: Point | null, node: number): boolean => {
+    const distance: number = extra + Math.hypot(x[node] - ex, y[node] - ey);
+    if (distance >= cost[node] || !wrapsAt(node, ex, ey) || !isVisible(walls, ex, ey, x[node], y[node])) return false;
+    if (seen_ && node < n) seen_.add(graph.components[node]);
+    if (circles.length > 0) {
+      const circle: number = blockingCircle(circles, circleCells, seen, ++test, ex, ey, x[node], y[node]);
+      if (circle !== -1) {
+        activate(circle);
+        return false;
       }
     }
-    return [cost, via];
+    cost[node] = distance;
+    via[node] = escape;
+    return true;
   };
-  // the rest of the way to the end from each node that sees it
-  const [toEnd, endVia] = link(end);
-  const [fromStart, startVia] = link(start);
-  const distances: Float64Array = new Float64Array(n).fill(Infinity);
-  const parents: Int32Array = new Int32Array(n).fill(-1);
-  const closed: Uint8Array = new Uint8Array(n);
+  const reach = (cost: Float64Array, via: (Point | null)[], ex: number, ey: number, extra: number, escape: Point | null, from: number, to: number): boolean => {
+    let linked: boolean = false;
+    for (let node: number = from; node < to; node++) linked = reachNode(cost, via, ex, ey, extra, escape, node) || linked;
+    return linked;
+  };
+  // the same for the graph's nodes within MOVING_REACH and the temporary ones: for the many escape
+  // points around a point stuck in a corner
+  const reachNear = (cost: Float64Array, via: (Point | null)[], ex: number, ey: number, extra: number, escape: Point): void => {
+    near(nodeCells, ex - MOVING_REACH, ey - MOVING_REACH, ex + MOVING_REACH, ey + MOVING_REACH, (node: number) => {
+      reachNode(cost, via, ex, ey, extra, escape, node);
+    });
+    reach(cost, via, ex, ey, extra, escape, n, total);
+  };
+  // A point a few pixels off the outline nearest to (px, py), or null: pushed away from it twice, in
+  // case the first push lands within another outline, as in a corner.
+  const pushOff = (px: number, py: number): Point | null => {
+    let [ex, ey] = [px, py];
+    for (let attempt: number = 0; attempt < 2; attempt++) {
+      let nearest: number = Infinity, awayX: number = 0, awayY: number = 0;
+      near(walls, ex - 4, ey - 4, ex + 4, ey + 4, (wall: number) => {
+        const [ax, ay, bx, by] = walls.segments.subarray(4 * wall, 4 * wall + 4);
+        const dx: number = bx - ax, dy: number = by - ay;
+        const t: number = Math.max(0, Math.min(1, ((ex - ax) * dx + (ey - ay) * dy) / (dx * dx + dy * dy || 1)));
+        const cx: number = ax + t * dx, cy: number = ay + t * dy, distance: number = Math.hypot(ex - cx, ey - cy);
+        if (distance >= nearest) return;
+        nearest = distance;
+        // away from the wall: from its closest point, or along its normal (right of the walk) when on it
+        [awayX, awayY] = distance > 1e-9 ? [(ex - cx) / distance, (ey - cy) / distance] : [-dy / Math.hypot(dx, dy), dx / Math.hypot(dx, dy)];
+        if (distance <= 1e-9) nearest = 0;
+      });
+      if (nearest === Infinity || nearest >= 2.5) break;
+      [ex, ey] = [ex + awayX * (2.5 - nearest), ey + awayY * (2.5 - nearest)];
+    }
+    if ((ex === px && ey === py) || !isSegmentClear(grid, w, h, px, py, ex, ey) || inCircle(ex, ey)) return null;
+    return circles.length > 0 && blockingCircle(circles, circleCells, seen, ++test, px, py, ex, ey) !== -1 ? null : [ex, ey];
+  };
+  // The nodes a point links to, with the length of each link. A point within the tolerance of a wall
+  // may be inside its outline and see no node. It then links through an escape point pushed off that
+  // outline, or failing that, through escape points around it, reached over free pixels; escapes are kept
+  // so temporary nodes can link through them too.
+  const link = ([px, py]: Point, cost: Float64Array, via: (Point | null)[], components: Set<number>): Point[] => {
+    seen_ = components;
+    try {
+      return linkThrough(px, py, cost, via);
+    } finally {
+      seen_ = null;
+    }
+  };
+  const linkThrough = (px: number, py: number, cost: Float64Array, via: (Point | null)[]): Point[] => {
+    if (reach(cost, via, px, py, 0, null, 0, total)) return [];
+    const pushed: Point | null = pushOff(px, py);
+    if (pushed && reach(cost, via, pushed[0], pushed[1], Math.hypot(pushed[0] - px, pushed[1] - py), pushed, 0, total)) return [pushed];
+    const escapes: Point[] = [];
+    for (const radius of [2, 4, 8]) {
+      for (let k: number = 0; k < 16; k++) {
+        const ex: number = px + radius * Math.cos(k * Math.PI / 8), ey: number = py + radius * Math.sin(k * Math.PI / 8);
+        if (!isSegmentClear(grid, w, h, px, py, ex, ey) || inCircle(ex, ey)) continue;
+        if (circles.length > 0 && blockingCircle(circles, circleCells, seen, ++test, px, py, ex, ey) !== -1) continue;
+        escapes.push([ex, ey]);
+        reachNear(cost, via, ex, ey, radius, [ex, ey]);
+      }
+      if (via.some((escape: Point | null) => escape !== null)) break;
+    }
+    return escapes;
+  };
+  // start and end must see the same component past the walls: circles only take paths away
+  const endComponents: Set<number> = new Set(), startComponents: Set<number> = new Set();
+  const endEscapes: Point[] = link(end, toEnd, endVia, endComponents);
+  const startEscapes: Point[] = link(start, fromStart, startVia, startComponents);
+  // (a point that sees none of the graph's nodes, as on an open field, may still get around circles)
+  const shared: boolean = [...startComponents].some((component: number) => endComponents.has(component));
+  if (startComponents.size > 0 && endComponents.size > 0 && !shared) return [];
+
+  const distances: Float64Array = new Float64Array(capacity).fill(Infinity);
+  const parents: Int32Array = new Int32Array(capacity).fill(-1);
+  const closed: Uint8Array = new Uint8Array(capacity);
   // binary heap of nodes by distance + straight-line distance to the end
   const heap: number[] = [], priority: number[] = [];
   const push = (node: number, value: number): void => {
@@ -381,11 +596,49 @@ export function navigationGraphSearch(graph: NavigationGraph, grid: Uint8Array, 
     return top;
   };
   const heuristic = (node: number): number => Math.hypot(endX - x[node], endY - y[node]);
-  for (let node: number = 0; node < n; node++) {
-    if (fromStart[node] === Infinity) continue;
+  const relax = (node: number, next: number, cost: number): void => {
+    const distance: number = distances[node] + cost;
+    if (closed[next] || distance >= distances[next]) return;
+    distances[next] = distance;
+    parents[next] = node;
+    push(next, distance + heuristic(next));
+  };
+  const start_ = (node: number): void => {
+    if (fromStart[node] >= distances[node]) return;
     distances[node] = fromStart[node];
+    parents[node] = -1;
     push(node, distances[node] + heuristic(node));
-  }
+  };
+  // links temporary nodes that came into play to start and end (directly or through their escapes);
+  // linking may bring more circles into play
+  const linkPending = (): void => {
+    while (pending.length > 0) {
+      const node: number = pending.shift() as number;
+      if (!reach(toEnd, endVia, endX, endY, 0, null, node, node + 1)) {
+        endEscapes.forEach(([ex, ey]: Point) => reach(toEnd, endVia, ex, ey, Math.hypot(ex - endX, ey - endY), [ex, ey], node, node + 1));
+      }
+      if (!reach(fromStart, startVia, startX, startY, 0, null, node, node + 1)) {
+        startEscapes.forEach(([ex, ey]: Point) => reach(fromStart, startVia, ex, ey, Math.hypot(ex - startX, ey - startY), [ex, ey], node, node + 1));
+      }
+      start_(node);
+    }
+  };
+  // links between a node and the nodes near it, in cells, numbered from offset: temporary nodes for any
+  // node, the graph's nodes for a temporary one
+  const relaxNear = (node: number, cells: Buckets | null, from: number, to: number): void => {
+    const nx: number = x[node], ny: number = y[node];
+    const consider = (next: number): void => {
+      if (next === node || closed[next]) return;
+      const cost: number = Math.hypot(x[next] - nx, y[next] - ny);
+      if (cost > MOVING_REACH || distances[node] + cost >= distances[next]) return;
+      if (!wrapsAt(next, nx, ny) || !visible(node, x[next], y[next])) return;
+      relax(node, next, cost);
+    };
+    if (cells) near(cells, nx - MOVING_REACH, ny - MOVING_REACH, nx + MOVING_REACH, ny + MOVING_REACH, consider);
+    else for (let next: number = from; next < to; next++) consider(next);
+  };
+  for (let node: number = 0; node < n; node++) start_(node);
+  linkPending();
 
   let best: number = Infinity, last: number = -1; // the shortest way to the end found so far, via node last
   while (heap.length > 0) {
@@ -394,13 +647,18 @@ export function navigationGraphSearch(graph: NavigationGraph, grid: Uint8Array, 
     if (distances[node] + heuristic(node) >= best) break; // nothing left can beat it
     closed[node] = 1;
     if (distances[node] + toEnd[node] < best) [best, last] = [distances[node] + toEnd[node], node];
-    for (let k: number = offsets[node]; k < offsets[node + 1]; k++) {
-      const next: number = targets[k], distance: number = distances[node] + costs[k];
-      if (closed[next] || distance >= distances[next]) continue;
-      distances[next] = distance;
-      parents[next] = node;
-      push(next, distance + heuristic(next));
+    if (node < n) {
+      for (let k: number = offsets[node]; k < offsets[node + 1]; k++) {
+        const next: number = targets[k];
+        if (closed[next] || distances[node] + costs[k] >= distances[next]) continue;
+        if (!missesCircles(x[node], y[node], x[next], y[next])) continue;
+        relax(node, next, costs[k]);
+      }
+    } else {
+      relaxNear(node, nodeCells, 0, n);
     }
+    linkPending();
+    if (total > n) relaxNear(node, null, n, total); // few: only circles that came into play
   }
   if (last === -1) return [];
   const path: Point[] = [end];

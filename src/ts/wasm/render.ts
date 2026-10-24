@@ -2,6 +2,7 @@ import { Circle, Point } from '../geometry';
 import { City, Field } from '../get-data';
 import { fillCells } from '../utils/fill-cells';
 import { COLORS } from './palette';
+import { TrafficShapes } from './traffic';
 
 // One algorithm's result: a path of cell numbers, or waypoints in pixel coordinates.
 export interface PathLayer {
@@ -22,6 +23,8 @@ export interface Controls {
   diagonal: boolean,
   overlay: boolean,
   overlayAvailable: boolean,
+  traffic: boolean,
+  trafficAvailable: boolean, // city maps only
   map: string,
   procedural: boolean, // whether the map can generate a new layout
   uiHidden: boolean, // legend and controls hidden, so they don't cover the map
@@ -44,6 +47,7 @@ export function render(
   controls: Controls,
   overlay: GraphOverlay | null,
   { scale, offsetX, offsetY }: View,
+  traffic: TrafficShapes | null = null,
 ): void {
   if (!ctx) return;
 
@@ -94,6 +98,8 @@ export function render(
     if (layer.points) strokePolyline(ctx, layer.points, layer.color, layer.size * pixel);
   }
 
+  if (traffic) renderTraffic(ctx, traffic, pixel);
+
   renderMarker(ctx, endPointCoordinates, field.markerRadius, COLORS.end, pixel);
   renderMarker(ctx, field.startPointCoordinates, field.markerRadius, COLORS.start, pixel);
 
@@ -105,6 +111,26 @@ export function render(
   }
   renderLegend(ctx, LEGEND_FONT_SIZE, layers);
   renderControls(ctx, w, LEGEND_FONT_SIZE, controls);
+}
+
+// Pedestrians at their real size, but at least a canvas pixel and a half across so they stay visible;
+// cars as their outlines.
+function renderTraffic(ctx: CanvasRenderingContext2D, { pedestrians, pedestrianRadius, cars }: TrafficShapes, pixel: number): void {
+  ctx.fillStyle = COLORS.car;
+  ctx.beginPath();
+  for (const corners of cars) {
+    corners.forEach(([x, y]: Point, i: number) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
+    ctx.closePath();
+  }
+  ctx.fill();
+  const radius: number = Math.max(pedestrianRadius, .75 * pixel);
+  ctx.fillStyle = COLORS.pedestrian;
+  ctx.beginPath();
+  for (const [x, y] of pedestrians) {
+    ctx.moveTo(x + radius, y);
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+  }
+  ctx.fill();
 }
 
 // A start or end marker at its real size; when that is too small to see, a ring around it shows where it is.
@@ -252,24 +278,25 @@ function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number, layers: P
 }
 
 const CONTROL_ROWS: string[] = [
-  '000 FPS · 000.0 ms/frame', '[ ] Diagonal (D)', '[ ] Graph overlay (G)', '▸ Map: Scatter (M)', '↻ New layout (R)', '◱ Hide UI (H)',
+  '000 FPS · 000.0 ms/frame', '[ ] Diagonal (D)', '[ ] Graph overlay (G)', '[ ] Traffic (T)', '▸ Map: Scatter (M)', '↻ New layout (R)', '◱ Hide UI (H)',
   'Drag to move the end point', 'Wheel zoom · Shift+drag pan',
 ];
-const CHECKBOX_ROWS: { control: 'diagonal' | 'overlay', label: string, row: number }[] = [
+const CHECKBOX_ROWS: { control: 'diagonal' | 'overlay' | 'traffic', label: string, row: number }[] = [
   { control: 'diagonal', label: 'Diagonal (D)', row: 1 },
   { control: 'overlay', label: 'Graph overlay (G)', row: 2 },
+  { control: 'traffic', label: 'Traffic (T)', row: 3 },
 ];
-const MAP_ROW: number = 3;
-const LAYOUT_ROW: number = 4;
-const HIDE_ROW: number = 5;
-const HINT_ROW: number = 6;
-const ZOOM_HINT_ROW: number = 7;
+const MAP_ROW: number = 4;
+const LAYOUT_ROW: number = 5;
+const HIDE_ROW: number = 6;
+const HINT_ROW: number = 7;
+const ZOOM_HINT_ROW: number = 8;
 const CLICKABLE_ROWS: { control: Control, row: number }[] = [
   ...CHECKBOX_ROWS, { control: 'map', row: MAP_ROW }, { control: 'layout', row: LAYOUT_ROW }, { control: 'ui', row: HIDE_ROW },
 ];
 const SHOW_UI_LABEL: string = '◱ Show UI (H)';
 
-export type Control = 'diagonal' | 'overlay' | 'map' | 'layout' | 'ui';
+export type Control = 'diagonal' | 'overlay' | 'traffic' | 'map' | 'layout' | 'ui';
 
 // panel in the top-right corner, sized for the widest row it can show
 function controlsLeft(ctx: CanvasRenderingContext2D, w: number, fontSize: number): number {
@@ -302,7 +329,8 @@ function renderControls(ctx: CanvasRenderingContext2D, w: number, fontSize: numb
   ctx.lineWidth = 1.5;
   for (const { control, label, row } of CHECKBOX_ROWS) {
     const rowY: number = legendRowY(fontSize, row);
-    ctx.globalAlpha = control === 'overlay' && !controls.overlayAvailable ? .35 : 1;
+    const available: boolean = control === 'overlay' ? controls.overlayAvailable : control === 'traffic' ? controls.trafficAvailable : true;
+    ctx.globalAlpha = available ? 1 : .35;
     ctx.strokeRect(left, rowY - box / 2, box, box);
     if (controls[control]) ctx.fillRect(left + box * .2, rowY - box * .3, box * .6, box * .6);
     ctx.fillText(label, left + box + fontSize * .5, rowY);

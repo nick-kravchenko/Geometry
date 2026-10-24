@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Point } from '../geometry';
+import { Circle, Point } from '../geometry';
 import { breadthFirstSearch, buildNavigationGraph, NavigationGraph, navigationGraphSearch, visibilityGraphSearch } from '.';
 import { isSegmentClear, isVisible, simplifyLoop, traceOutlines } from './navigation-graph';
 
@@ -163,3 +163,64 @@ describe('navigationGraphSearch', () => {
     }
   });
 });
+
+describe('navigationGraphSearch around moving circles', () => {
+  // whether no segment of the path comes closer than radius to a circle's center
+  const missesCircles = (path: Point[], circles: Circle[]): boolean => path.slice(1).every(([x1, y1]: Point, i: number) => {
+    const [x0, y0] = path[i];
+    return circles.every(([[cx, cy], r]: Circle) => {
+      const dx: number = x1 - x0, dy: number = y1 - y0;
+      const t: number = Math.max(0, Math.min(1, ((cx - x0) * dx + (cy - y0) * dy) / (dx * dx + dy * dy || 1)));
+      return Math.hypot(x0 + t * dx - cx, y0 + t * dy - cy) >= r - 1e-9;
+    });
+  });
+
+  it('goes around a circle in the way, close to the shortest way around it', () => {
+    const grid: Uint8Array = new Uint8Array(100 * 100);
+    const graph: NavigationGraph = buildNavigationGraph(grid, 100, 100);
+    const circle: Circle = [[50, 50], 10];
+    const path: Point[] = navigationGraphSearch(graph, grid, 100, 100, [20, 50], [80, 50], [circle]);
+    expect(missesCircles(path, [circle])).toBe(true);
+    // the shortest way: two tangents of √(30² - 10²) and the arc between them; the octagon's corners
+    // stick out a little past the circle
+    const tangent: number = Math.sqrt(30 ** 2 - 100), arc: number = 10 * (Math.PI - 2 * Math.acos(10 / 30));
+    expect(length(path)).toBeGreaterThan(2 * tangent + arc);
+    expect(length(path)).toBeLessThan((2 * tangent + arc) * 1.05);
+  });
+
+  it('finds no path when circles close a corridor, and one again when they move on', () => {
+    const size: number = 60;
+    const grid: Uint8Array = new Uint8Array(size * size);
+    for (let y: number = 0; y < size; y++) for (let x: number = 0; x < size; x++) if (y < 25 || y >= 35) grid[y * size + x] = 1;
+    const graph: NavigationGraph = buildNavigationGraph(grid, size, size);
+    expect(navigationGraphSearch(graph, grid, size, size, [5.5, 30], [55.5, 30], [[[30, 30], 6]])).toEqual([]);
+    expect(navigationGraphSearch(graph, grid, size, size, [5.5, 30], [55.5, 30], [[[30, 25], 3]])).toEqual([[5.5, 30], [55.5, 30]]);
+  });
+
+  it('finds paths around moving circles whenever there clearly is room, staying out of them', () => {
+    const rand: () => number = random(9);
+    const size: number = 120;
+    for (let t: number = 0; t < 20; t++) {
+      const grid: Uint8Array = randomField(rand, size, 8, 6);
+      const graph: NavigationGraph = buildNavigationGraph(grid, size, size);
+      const circles: Circle[] = Array.from({ length: 12 }, (): Circle => [[rand() * size, rand() * size], 2 + rand() * 5]);
+      // the grid with the circles grown by 2 px: a path there means plenty of room around them
+      const crowded: Uint8Array = grid.slice();
+      for (let i: number = 0; i < size * size; i++) {
+        const px: number = i % size + .5, py: number = ~~(i / size) + .5;
+        if (circles.some(([[cx, cy], r]: Circle) => Math.hypot(px - cx, py - cy) < r + 2)) crowded[i] = 1;
+      }
+      for (let q: number = 0; q < 6; q++) {
+        const from: number = ~~(rand() * size * size), to: number = ~~(rand() * size * size);
+        if (crowded[from] || crowded[to]) continue;
+        const start: Point = [from % size + .5, ~~(from / size) + .5], end: Point = [to % size + .5, ~~(to / size) + .5];
+        const path: Point[] = navigationGraphSearch(graph, grid, size, size, start, end, circles);
+        if (breadthFirstSearch(crowded, size, size, from, to).length > 0) expect(path.length).toBeGreaterThan(0);
+        if (path.length === 0) continue;
+        expect(missesCircles(path, circles)).toBe(true);
+        for (let i: number = 1; i < path.length; i++) expect(staysOut(grid, size, size, path[i - 1], path[i], 1.5)).toBe(true);
+      }
+    }
+  });
+});
+

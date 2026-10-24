@@ -229,7 +229,7 @@ fn pathfinder_navigation_graph_finds_paths_close_to_the_exact_visibility_graph()
             if grid[from as usize] == 1 || grid[to as usize] == 1 { continue; }
             let center = |cell: u32| ((cell as usize % size) as f64 + 0.5, (cell as usize / size) as f64 + 0.5);
             let ((sx, sy), (ex, ey)) = (center(from), center(to));
-            let path = pathfinder.navigation_graph_search(sx, sy, ex, ey);
+            let path = pathfinder.navigation_graph_search(sx, sy, ex, ey, &[]);
             let reachable = !pathfinder.breadth_first_search(from, to, false).is_empty();
             assert_eq!(!path.is_empty(), reachable);
             if !reachable { continue; }
@@ -238,6 +238,47 @@ fn pathfinder_navigation_graph_finds_paths_close_to_the_exact_visibility_graph()
             let bends = (path.len() / 2 - 2) as f64;
             // nodes sit just off the corners, so each bend may cost a few pixels
             assert!(length(&path) <= exact + 3.0 * bends + 1.0, "{} > {exact}", length(&path));
+        }
+    }
+}
+
+#[test]
+fn pathfinder_navigation_graph_goes_around_moving_circles() {
+    let mut random = Random(0x68E31DA4);
+    let size = 100usize;
+    let mut pathfinder = Pathfinder::new(size as u32, size as u32);
+    let mut crowded_finder = Pathfinder::new(size as u32, size as u32);
+    for _ in 0..20 {
+        let mut grid = vec![0u8; size * size];
+        for _ in 0..6 {
+            let (x0, y0) = (10 + (random.next() * 70.0) as usize, 10 + (random.next() * 70.0) as usize);
+            for y in y0..y0 + 12 { for x in x0..x0 + 12 { grid[y * size + x] = 1; } }
+        }
+        let circles: Vec<(f64, f64, f64)> = (0..10).map(|_| (random.next() * size as f64, random.next() * size as f64, 2.0 + random.next() * 5.0)).collect();
+        let flat: Vec<f64> = circles.iter().flat_map(|&(x, y, r)| [x, y, r]).collect();
+        // the grid with the circles grown by 2 px: a path there means plenty of room around them
+        let mut crowded = grid.clone();
+        for (i, cell) in crowded.iter_mut().enumerate() {
+            let (px, py) = ((i % size) as f64 + 0.5, (i / size) as f64 + 0.5);
+            if circles.iter().any(|&(cx, cy, r)| (px - cx).hypot(py - cy) < r + 2.0) { *cell = 1; }
+        }
+        pathfinder.set_cells(&grid);
+        pathfinder.build_navigation_graph(1.5);
+        crowded_finder.set_cells(&crowded);
+        for _ in 0..8 {
+            let (from, to) = ((random.next() * (size * size - 1) as f64) as u32, (random.next() * (size * size - 1) as f64) as u32);
+            if crowded[from as usize] == 1 || crowded[to as usize] == 1 { continue; }
+            let center = |cell: u32| ((cell as usize % size) as f64 + 0.5, (cell as usize / size) as f64 + 0.5);
+            let ((sx, sy), (ex, ey)) = (center(from), center(to));
+            let path = pathfinder.navigation_graph_search(sx, sy, ex, ey, &flat);
+            if !crowded_finder.breadth_first_search(from, to, false).is_empty() { assert!(!path.is_empty()); }
+            for (a, b) in path.chunks(2).zip(path.chunks(2).skip(1)) {
+                for &(cx, cy, r) in &circles {
+                    let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+                    let t = (((cx - a[0]) * dx + (cy - a[1]) * dy) / (dx * dx + dy * dy).max(1e-12)).clamp(0.0, 1.0);
+                    assert!((a[0] + t * dx - cx).hypot(a[1] + t * dy - cy) >= r - 1e-9);
+                }
+            }
         }
     }
 }

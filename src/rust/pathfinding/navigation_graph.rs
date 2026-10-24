@@ -1,49 +1,155 @@
 use std::cmp::Ordering;
-use std::collections::BinaryHeap;
+use std::collections::{BinaryHeap, HashSet, VecDeque};
 use std::f64::consts::PI;
 
 const NONE: usize = usize::MAX;
 const WALL_CELL: f64 = 32.0;
+const NODE_CELL: f64 = 64.0;
+// how far a temporary node around a moving obstacle looks for nodes to link to: 40 m on Kyiv
+const MOVING_REACH: f64 = 160.0;
+
+// A moving obstacle: center x, center y, radius, already grown by the mover's radius.
+pub type Circle = (f64, f64, f64);
 
 // Port of the TypeScript navigation graph: a visibility graph over simplified obstacle outlines, built
 // once per grid, for paths at any angle in a few milliseconds even on large grids. Obstacles are traced
 // and simplified to within `tolerance` pixels; the convex corners of the outlines become nodes, just
 // off them in free space. Two nodes are linked when the segment between them wraps around both corners
 // and crosses no outline. A path may cut into an obstacle by up to `tolerance` pixels; keep it within
-// the padding around obstacles. Searches reuse the graph and their buffers.
+// the padding around obstacles. Searches may pass moving circles; they reuse the graph and buffers.
 pub struct NavigationGraph {
+  graph: Graph,
+  buffers: Buffers,
+}
+
+// What the build produces; searches only read it.
+struct Graph {
+  nodes: Nodes,
+  offsets: Vec<usize>, // edges of node i: targets[offsets[i]..offsets[i + 1]]
+  targets: Vec<u32>,
+  costs: Vec<f64>,
+  components: Vec<u32>, // per node, its connected component, so a search between two can stop at once
+  walls: Vec<f64>, // outline segments [x0, y0, x1, y1, ...]
+  wall_cells: Buckets,
+  node_cells: Buckets, // the nodes, bucketed, to find the ones near a point
+}
+
+// Node positions, and per node its corner and the corner's neighbouring outline vertices, for the
+// wrap-around test.
+#[derive(Default, Clone)]
+struct Nodes {
   x: Vec<f64>,
   y: Vec<f64>,
-  // per node, its corner and the corner's neighbouring outline vertices, for the wrap-around test
   corner_x: Vec<f64>,
   corner_y: Vec<f64>,
   previous_x: Vec<f64>,
   previous_y: Vec<f64>,
   next_x: Vec<f64>,
   next_y: Vec<f64>,
-  offsets: Vec<usize>, // edges of node i: targets[offsets[i]..offsets[i + 1]]
-  targets: Vec<u32>,
-  costs: Vec<f64>,
-  walls: Walls,
-  // search buffers
+}
+
+impl Nodes {
+  fn len(&self) -> usize { self.x.len() }
+
+  fn push(&mut self, (x, y): (f64, f64), (cx, cy): (f64, f64), (px, py): (f64, f64), (qx, qy): (f64, f64)) {
+    self.x.push(x);
+    self.y.push(y);
+    self.corner_x.push(cx);
+    self.corner_y.push(cy);
+    self.previous_x.push(px);
+    self.previous_y.push(py);
+    self.next_x.push(qx);
+    self.next_y.push(qy);
+  }
+
+  fn truncate_to(&mut self, other: &Nodes) {
+    for (mine, theirs) in [
+      (&mut self.x, &other.x), (&mut self.y, &other.y), (&mut self.corner_x, &other.corner_x), (&mut self.corner_y, &other.corner_y),
+      (&mut self.previous_x, &other.previous_x), (&mut self.previous_y, &other.previous_y), (&mut self.next_x, &other.next_x), (&mut self.next_y, &other.next_y),
+    ] {
+      mine.clear();
+      mine.extend_from_slice(theirs);
+    }
+  }
+
+  fn wraps(&self, node: usize, target: (f64, f64)) -> bool {
+    wraps((self.corner_x[node], self.corner_y[node]), (self.previous_x[node], self.previous_y[node]), (self.next_x[node], self.next_y[node]), target)
+  }
+}
+
+// Search buffers, kept between searches.
+#[derive(Default)]
+struct Buffers {
+  nodes: Nodes, // the graph's nodes, then temporary ones around moving circles
+  wall_seen: Vec<u32>,
+  wall_test: u32,
+  circle_seen: Vec<u32>,
+  circle_test: u32,
+  active: Vec<bool>,
+  pending: VecDeque<usize>,
+  to_end: Vec<f64>,
+  from_start: Vec<f64>,
+  end_via: Vec<Option<(f64, f64)>>,
+  start_via: Vec<Option<(f64, f64)>>,
   distances: Vec<f64>,
   parents: Vec<usize>,
   closed: Vec<bool>,
-  from_start: Vec<f64>,
-  to_end: Vec<f64>,
-  start_via: Vec<Option<(f64, f64)>>,
-  end_via: Vec<Option<(f64, f64)>>,
+  near: Vec<u32>,
 }
 
-// The outline segments, bucketed into square cells for line-of-sight tests.
-struct Walls {
-  segments: Vec<f64>, // [x0, y0, x1, y1, ...]
+// Items bucketed into square cells by their bounding boxes.
+#[derive(Default)]
+struct Buckets {
+  cell_size: f64,
   columns: usize,
   rows: usize,
-  offsets: Vec<usize>, // segments in cell c: indices[offsets[c]..offsets[c + 1]]
+  offsets: Vec<usize>, // items in cell c: indices[offsets[c]..offsets[c + 1]]
   indices: Vec<u32>,
-  seen: Vec<u32>, // per segment, the last test that checked it, so a test checks each segment once
-  test: u32,
+}
+
+impl Buckets {
+  // Items given by bounding boxes [min_x, min_y, max_x, max_y, ...], clamped to the grid.
+  fn new(boxes: &[f64], w: usize, h: usize, cell_size: f64) -> Buckets {
+    let columns = ((w as f64 + 2.0) / cell_size).ceil() as usize;
+    let rows = ((h as f64 + 2.0) / cell_size).ceil() as usize;
+    let mut buckets = Buckets { cell_size, columns, rows, offsets: vec![0; columns * rows + 1], indices: Vec::new() };
+    for b in boxes.as_chunks::<4>().0 {
+      let (from_column, to_column, from_row, to_row) = buckets.range(b[0], b[1], b[2], b[3]);
+      for row in from_row..=to_row { for column in from_column..=to_column { buckets.offsets[row * columns + column + 1] += 1; } }
+    }
+    for c in 0..columns * rows { buckets.offsets[c + 1] += buckets.offsets[c]; }
+    let mut fill = buckets.offsets[..columns * rows].to_vec();
+    buckets.indices = vec![0; buckets.offsets[columns * rows]];
+    for (item, b) in boxes.as_chunks::<4>().0.iter().enumerate() {
+      let (from_column, to_column, from_row, to_row) = buckets.range(b[0], b[1], b[2], b[3]);
+      for row in from_row..=to_row {
+        for column in from_column..=to_column {
+          let c = row * columns + column;
+          buckets.indices[fill[c]] = item as u32;
+          fill[c] += 1;
+        }
+      }
+    }
+    buckets
+  }
+
+  fn cell(&self, v: f64, count: usize) -> usize { (((v + 1.0) / self.cell_size).floor().max(0.0) as usize).min(count - 1) }
+
+  fn range(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> (usize, usize, usize, usize) {
+    (self.cell(min_x, self.columns), self.cell(max_x, self.columns), self.cell(min_y, self.rows), self.cell(max_y, self.rows))
+  }
+
+  // The items in the cells overlapping the box, into out; an item may come up more than once.
+  fn near(&self, min_x: f64, min_y: f64, max_x: f64, max_y: f64, out: &mut Vec<u32>) {
+    out.clear();
+    let (from_column, to_column, from_row, to_row) = self.range(min_x, min_y, max_x, max_y);
+    for row in from_row..=to_row {
+      for column in from_column..=to_column {
+        let c = row * self.columns + column;
+        out.extend_from_slice(&self.indices[self.offsets[c]..self.offsets[c + 1]]);
+      }
+    }
+  }
 }
 
 // min-heap entry for A*
@@ -199,87 +305,97 @@ fn wraps((x, y): (f64, f64), (px, py): (f64, f64), (qx, qy): (f64, f64), (tx, ty
   side_p * side_q >= 0.0
 }
 
-impl Walls {
-  fn new(segments: Vec<f64>, w: usize, h: usize) -> Walls {
-    let columns = ((w as f64 + 2.0) / WALL_CELL).ceil() as usize;
-    let rows = ((h as f64 + 2.0) / WALL_CELL).ceil() as usize;
-    let cell = |v: f64, count: usize| (((v + 1.0) / WALL_CELL).floor().max(0.0) as usize).min(count - 1);
-    let mut cells: Vec<Vec<u32>> = vec![Vec::new(); columns * rows];
-    for (k, s) in segments.as_chunks::<4>().0.iter().enumerate() {
-      for row in cell(s[1].min(s[3]), rows)..=cell(s[1].max(s[3]), rows) {
-        for column in cell(s[0].min(s[2]), columns)..=cell(s[0].max(s[2]), columns) {
-          cells[row * columns + column].push(k as u32);
-        }
+// Whether the segment from (x0, y0) to (x1, y1) crosses no wall: walks the cells along it from (x0, y0)
+// (Amanatides–Woo), testing the walls in each, every wall once, so a segment blocked near its start
+// stops early.
+#[allow(clippy::too_many_arguments)]
+fn is_visible(walls: &[f64], cells: &Buckets, seen: &mut [u32], test: u32, x0: f64, y0: f64, x1: f64, y1: f64) -> bool {
+  let (dx, dy) = (x1 - x0, y1 - y0);
+  let size = cells.cell_size;
+  // cell coordinates are shifted by a pixel, so the grid's -1 border falls in the first cell
+  let (cx0, cy0) = ((x0 + 1.0) / size, (y0 + 1.0) / size);
+  let (mut column, mut row) = (cx0.floor() as i64, cy0.floor() as i64);
+  let (end_column, end_row) = (((x1 + 1.0) / size).floor() as i64, ((y1 + 1.0) / size).floor() as i64);
+  let (step_x, step_y) = (if dx > 0.0 { 1 } else { -1 }, if dy > 0.0 { 1 } else { -1 });
+  let delta_x = if dx == 0.0 { f64::INFINITY } else { (size / dx).abs() };
+  let delta_y = if dy == 0.0 { f64::INFINITY } else { (size / dy).abs() };
+  let mut next_x = if dx > 0.0 { (column as f64 + 1.0 - cx0) * size / dx } else if dx < 0.0 { (column as f64 - cx0) * size / dx } else { f64::INFINITY };
+  let mut next_y = if dy > 0.0 { (row as f64 + 1.0 - cy0) * size / dy } else if dy < 0.0 { (row as f64 - cy0) * size / dy } else { f64::INFINITY };
+  for _ in 0..=(end_column - column).abs() + (end_row - row).abs() {
+    if column >= 0 && row >= 0 && (column as usize) < cells.columns && (row as usize) < cells.rows {
+      let c = row as usize * cells.columns + column as usize;
+      for &wall in &cells.indices[cells.offsets[c]..cells.offsets[c + 1]] {
+        let wall = wall as usize;
+        if seen[wall] == test { continue; }
+        seen[wall] = test;
+        let (ax, ay, bx, by) = (walls[4 * wall], walls[4 * wall + 1], walls[4 * wall + 2], walls[4 * wall + 3]);
+        // proper crossing: each segment's ends on opposite sides of the other's line
+        let d1 = dx * (ay - y0) - dy * (ax - x0);
+        let d2 = dx * (by - y0) - dy * (bx - x0);
+        if (d1 > 0.0 && d2 > 0.0) || (d1 < 0.0 && d2 < 0.0) { continue; }
+        let (ex, ey) = (bx - ax, by - ay);
+        let d3 = ex * (y0 - ay) - ey * (x0 - ax);
+        let d4 = ex * (y1 - ay) - ey * (x1 - ax);
+        if (d3 > 0.0 && d4 > 0.0) || (d3 < 0.0 && d4 < 0.0) { continue; }
+        if d1 == 0.0 && d2 == 0.0 { continue; } // parallel on the same line: touching along it, not crossing
+        return false;
       }
     }
-    let mut offsets = vec![0; cells.len() + 1];
-    for (c, list) in cells.iter().enumerate() { offsets[c + 1] = offsets[c] + list.len(); }
-    let seen = vec![0; segments.len() / 4];
-    Walls { segments, columns, rows, offsets, indices: cells.concat(), seen, test: 0 }
+    if next_x < next_y {
+      column += step_x;
+      next_x += delta_x;
+    } else {
+      row += step_y;
+      next_y += delta_y;
+    }
   }
+  true
+}
 
-  // Whether the segment crosses no wall: walks the cells along it and tests the walls in each, every
-  // wall once.
-  fn is_visible(&mut self, x0: f64, y0: f64, x1: f64, y1: f64) -> bool {
-    self.test = self.test.wrapping_add(1);
-    if self.test == 0 { // wrapped: every stamp must be forgotten
-      self.seen.fill(0);
-      self.test = 1;
-    }
-    let (dx, dy) = (x1 - x0, y1 - y0);
-    let from_row = (((y0.min(y1) + 1.0) / WALL_CELL).floor().max(0.0) as usize).min(self.rows - 1);
-    let to_row = (((y0.max(y1) + 1.0) / WALL_CELL).floor().max(0.0) as usize).min(self.rows - 1);
-    for row in from_row..=to_row {
-      // the segment's x range within this row's band of y
-      let (mut low, mut high) = (x0.min(x1), x0.max(x1));
-      if dy != 0.0 {
-        let top = row as f64 * WALL_CELL - 1.0;
-        let bottom = top + WALL_CELL;
-        let t0 = ((top - y0) / dy).clamp(0.0, 1.0);
-        let t1 = ((bottom - y0) / dy).clamp(0.0, 1.0);
-        low = x0 + dx * t0.min(t1);
-        high = x0 + dx * t0.max(t1);
-        if low > high { std::mem::swap(&mut low, &mut high); }
-      }
-      let from_column = ((low + 1.0) / WALL_CELL).floor().max(0.0) as usize;
-      let to_column = (((high + 1.0) / WALL_CELL).floor().max(0.0) as usize).min(self.columns - 1);
-      for column in from_column..=to_column {
-        let c = row * self.columns + column;
-        for k in self.offsets[c]..self.offsets[c + 1] {
-          let wall = self.indices[k] as usize;
-          if self.seen[wall] == self.test { continue; }
-          self.seen[wall] = self.test;
-          let s = &self.segments[4 * wall..4 * wall + 4];
-          let (ax, ay, bx, by) = (s[0], s[1], s[2], s[3]);
-          // proper crossing: each segment's ends on opposite sides of the other's line
-          let d1 = dx * (ay - y0) - dy * (ax - x0);
-          let d2 = dx * (by - y0) - dy * (bx - x0);
-          if (d1 > 0.0 && d2 > 0.0) || (d1 < 0.0 && d2 < 0.0) { continue; }
-          let (ex, ey) = (bx - ax, by - ay);
-          let d3 = ex * (y0 - ay) - ey * (x0 - ax);
-          let d4 = ex * (y1 - ay) - ey * (x1 - ax);
-          if (d3 > 0.0 && d4 > 0.0) || (d3 < 0.0 && d4 < 0.0) { continue; }
-          if d1 == 0.0 && d2 == 0.0 { continue; } // parallel on the same line: touching along it, not crossing
-          return false;
+// Next stamp for a seen buffer; when the counter wraps, every stamp must be forgotten.
+fn next_test(seen: &mut [u32], test: &mut u32) -> u32 {
+  *test = test.wrapping_add(1);
+  if *test == 0 {
+    seen.fill(0);
+    *test = 1;
+  }
+  *test
+}
+
+// Connected components of the graph: the component of each node.
+fn components(offsets: &[usize], targets: &[u32]) -> Vec<u32> {
+  let n = offsets.len() - 1;
+  let mut component = vec![u32::MAX; n];
+  let mut stack = Vec::new();
+  let mut label = 0;
+  for first in 0..n {
+    if component[first] != u32::MAX { continue; }
+    component[first] = label;
+    stack.push(first);
+    while let Some(node) = stack.pop() {
+      for &next in &targets[offsets[node]..offsets[node + 1]] {
+        if component[next as usize] == u32::MAX {
+          component[next as usize] = label;
+          stack.push(next as usize);
         }
       }
     }
-    true
+    label += 1;
   }
+  component
 }
 
 impl NavigationGraph {
   pub fn build(grid: &[u8], w: usize, h: usize, tolerance: f64) -> NavigationGraph {
-    let mut segments = Vec::new();
-    let (mut x, mut y, mut corner_x, mut corner_y) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    let (mut previous_x, mut previous_y, mut next_x, mut next_y) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let mut walls = Vec::new();
+    let mut nodes = Nodes::default();
     for outline in trace_outlines(grid, w, h) {
       let outline = simplify_loop(&outline, tolerance);
       let n = outline.len() / 2;
       for i in 0..n {
         let (p, q) = ((i + n - 1) % n, (i + 1) % n);
         let (cx, cy) = (outline[2 * i], outline[2 * i + 1]);
-        segments.extend([cx, cy, outline[2 * q], outline[2 * q + 1]]);
+        walls.extend([cx, cy, outline[2 * q], outline[2 * q + 1]]);
         let (in_x, in_y) = (cx - outline[2 * p], cy - outline[2 * p + 1]);
         let (out_x, out_y) = (outline[2 * q] - cx, outline[2 * q + 1] - cy);
         if in_x * out_y - in_y * out_x >= 0.0 { continue; } // not a left turn: not a convex corner of the obstacle
@@ -294,27 +410,23 @@ impl NavigationGraph {
         for distance in [offset, 2.0 * offset, 4.0 * offset] {
           let (nx, ny) = (cx + bx * distance, cy + by * distance);
           if !is_segment_clear(grid, w, h, nx, ny, nx, ny) { continue; }
-          x.push(nx);
-          y.push(ny);
-          corner_x.push(cx);
-          corner_y.push(cy);
-          previous_x.push(outline[2 * p]);
-          previous_y.push(outline[2 * p + 1]);
-          next_x.push(outline[2 * q]);
-          next_y.push(outline[2 * q + 1]);
+          nodes.push((nx, ny), (cx, cy), (outline[2 * p], outline[2 * p + 1]), (outline[2 * q], outline[2 * q + 1]));
           break;
         }
       }
     }
-    let mut walls = Walls::new(segments, w, h);
+    let wall_boxes: Vec<f64> = walls.as_chunks::<4>().0.iter().flat_map(|s| [s[0].min(s[2]), s[1].min(s[3]), s[0].max(s[2]), s[1].max(s[3])]).collect();
+    let wall_cells = Buckets::new(&wall_boxes, w, h, WALL_CELL);
+    let mut seen = vec![0; walls.len() / 4];
 
-    let n = x.len();
+    let n = nodes.len();
     let mut neighbours: Vec<Vec<u32>> = vec![Vec::new(); n];
+    let mut test = 0;
     for a in 0..n {
       for b in a + 1..n {
-        if !wraps((corner_x[a], corner_y[a]), (previous_x[a], previous_y[a]), (next_x[a], next_y[a]), (x[b], y[b])) { continue; }
-        if !wraps((corner_x[b], corner_y[b]), (previous_x[b], previous_y[b]), (next_x[b], next_y[b]), (x[a], y[a])) { continue; }
-        if !walls.is_visible(x[a], y[a], x[b], y[b]) { continue; }
+        if !nodes.wraps(a, (nodes.x[b], nodes.y[b])) || !nodes.wraps(b, (nodes.x[a], nodes.y[a])) { continue; }
+        let stamp = next_test(&mut seen, &mut test);
+        if !is_visible(&walls, &wall_cells, &mut seen, stamp, nodes.x[a], nodes.y[a], nodes.x[b], nodes.y[b]) { continue; }
         neighbours[a].push(b as u32);
         neighbours[b].push(a as u32);
       }
@@ -322,118 +434,343 @@ impl NavigationGraph {
     let mut offsets = vec![0; n + 1];
     for a in 0..n { offsets[a + 1] = offsets[a] + neighbours[a].len(); }
     let mut costs = Vec::with_capacity(offsets[n]);
-    for a in 0..n {
-      for &b in &neighbours[a] { costs.push(length(x[b as usize] - x[a], y[b as usize] - y[a])); }
+    for (a, list) in neighbours.iter().enumerate() {
+      for &b in list { costs.push(length(nodes.x[b as usize] - nodes.x[a], nodes.y[b as usize] - nodes.y[a])); }
     }
-    NavigationGraph {
-      x, y, corner_x, corner_y, previous_x, previous_y, next_x, next_y,
-      offsets, targets: neighbours.concat(), costs, walls,
-      distances: Vec::new(), parents: Vec::new(), closed: Vec::new(),
-      from_start: Vec::new(), to_end: Vec::new(), start_via: Vec::new(), end_via: Vec::new(),
-    }
+    let targets = neighbours.concat();
+    let node_boxes: Vec<f64> = (0..n).flat_map(|i| [nodes.x[i], nodes.y[i], nodes.x[i], nodes.y[i]]).collect();
+    let graph = Graph {
+      components: components(&offsets, &targets),
+      node_cells: Buckets::new(&node_boxes, w, h, NODE_CELL),
+      nodes, offsets, targets, costs, walls, wall_cells,
+    };
+    seen.fill(0); // the search's stamps count from 0 again
+    NavigationGraph { graph, buffers: Buffers { wall_seen: seen, ..Buffers::default() } }
   }
 
-  pub fn node_count(&self) -> usize { self.x.len() }
+  pub fn node_count(&self) -> usize { self.graph.nodes.len() }
 
   #[cfg(test)]
-  pub fn edge_count(&self) -> usize { self.targets.len() / 2 }
-
-  fn visible(&mut self, node: usize, tx: f64, ty: f64) -> bool {
-    wraps((self.corner_x[node], self.corner_y[node]), (self.previous_x[node], self.previous_y[node]), (self.next_x[node], self.next_y[node]), (tx, ty))
-      && self.walls.is_visible(tx, ty, self.x[node], self.y[node])
-  }
-
-  // The nodes a point links to, with the length of each link, into cost and via. A point within the
-  // tolerance of a wall may be inside its outline and see no node; it then links through an escape point
-  // a few pixels away, reached over free pixels.
-  fn link(&mut self, grid: &[u8], w: usize, h: usize, (px, py): (f64, f64), to_start: bool) {
-    let n = self.x.len();
-    let mut cost = std::mem::take(if to_start { &mut self.from_start } else { &mut self.to_end });
-    let mut via = std::mem::take(if to_start { &mut self.start_via } else { &mut self.end_via });
-    cost.clear();
-    cost.resize(n, f64::INFINITY);
-    via.clear();
-    via.resize(n, None);
-    // links the nodes visible from (ex, ey), extra pixels away from the point; whether any
-    let reach = |graph: &mut NavigationGraph, cost: &mut Vec<f64>, via: &mut Vec<Option<(f64, f64)>>, ex: f64, ey: f64, extra: f64, escape: Option<(f64, f64)>| {
-      let mut linked = false;
-      for node in 0..n {
-        let distance = extra + length(graph.x[node] - ex, graph.y[node] - ey);
-        if distance >= cost[node] || !graph.visible(node, ex, ey) { continue; }
-        cost[node] = distance;
-        via[node] = escape;
-        linked = true;
-      }
-      linked
-    };
-    let mut linked = reach(self, &mut cost, &mut via, px, py, 0.0, None);
-    for radius in [2.0, 4.0, 8.0] {
-      if linked { break; }
-      for k in 0..16 {
-        let angle = k as f64 * PI / 8.0;
-        let (ex, ey) = (px + radius * angle.cos(), py + radius * angle.sin());
-        if is_segment_clear(grid, w, h, px, py, ex, ey) { linked |= reach(self, &mut cost, &mut via, ex, ey, radius, Some((ex, ey))); }
-      }
-    }
-    if to_start { self.from_start = cost; self.start_via = via; } else { self.to_end = cost; self.end_via = via; }
-  }
+  pub fn edge_count(&self) -> usize { self.graph.targets.len() / 2 }
 
   // Shortest path on the graph from start to end (pixel coordinates, on free pixels), as waypoints
-  // [x0, y0, x1, y1, ...]. Start and end are linked to the nodes they can see; A* runs on the rest.
-  // Empty when there is no path.
-  pub fn search(&mut self, grid: &[u8], w: usize, h: usize, start: (f64, f64), end: (f64, f64)) -> Vec<f64> {
-    let ((start_x, start_y), (end_x, end_y)) = (start, end);
-    if !is_segment_clear(grid, w, h, start_x, start_y, start_x, start_y) || !is_segment_clear(grid, w, h, end_x, end_y, end_x, end_y) { return Vec::new(); }
-    if self.walls.is_visible(start_x, start_y, end_x, end_y) || is_segment_clear(grid, w, h, start_x, start_y, end_x, end_y) {
-      return vec![start_x, start_y, end_x, end_y];
+  // [x0, y0, x1, y1, ...]; empty when there is no path. Start and end are linked to the nodes they can
+  // see; A* runs on the rest.
+  //
+  // circles are moving obstacles; the graph stays as built. A segment the search tests that cuts into a
+  // circle is blocked, and the circle comes into play: it gets eight temporary nodes, the corners of an
+  // octagon around it, linked to start, end and the nodes within MOVING_REACH that see them. Nodes the
+  // search finished before a circle came into play do not link to its nodes, so a path can come out a
+  // little longer than the shortest.
+  pub fn search(&mut self, grid: &[u8], w: usize, h: usize, start: (f64, f64), end: (f64, f64), circles: &[Circle]) -> Vec<f64> {
+    let in_circle = |(px, py): (f64, f64)| circles.iter().any(|&(cx, cy, r)| (px - cx) * (px - cx) + (py - cy) * (py - cy) < r * r);
+    if !is_segment_clear(grid, w, h, start.0, start.1, start.0, start.1) || !is_segment_clear(grid, w, h, end.0, end.1, end.0, end.1) { return Vec::new(); }
+    if in_circle(start) || in_circle(end) { return Vec::new(); }
+    let circle_boxes: Vec<f64> = circles.iter().flat_map(|&(cx, cy, r)| [cx - r, cy - r, cx + r, cy + r]).collect();
+    let mut query = Query {
+      graph: &self.graph, b: &mut self.buffers, grid, w, h, circles,
+      circle_cells: Buckets::new(&circle_boxes, w, h, WALL_CELL), start, end,
+    };
+    query.run()
+  }
+}
+
+// One search's state over the graph and the buffers.
+struct Query<'a> {
+  graph: &'a Graph,
+  b: &'a mut Buffers,
+  grid: &'a [u8],
+  w: usize,
+  h: usize,
+  circles: &'a [Circle],
+  circle_cells: Buckets,
+  start: (f64, f64),
+  end: (f64, f64),
+}
+
+impl Query<'_> {
+  fn in_circle(&self, (px, py): (f64, f64)) -> bool {
+    self.circles.iter().any(|&(cx, cy, r)| (px - cx) * (px - cx) + (py - cy) * (py - cy) < r * r)
+  }
+
+  fn walls_visible(&mut self, (x0, y0): (f64, f64), (x1, y1): (f64, f64)) -> bool {
+    let test = next_test(&mut self.b.wall_seen, &mut self.b.wall_test);
+    is_visible(&self.graph.walls, &self.graph.wall_cells, &mut self.b.wall_seen, test, x0, y0, x1, y1)
+  }
+
+  // The first circle the segment cuts into, or NONE.
+  fn blocking_circle(&mut self, (x0, y0): (f64, f64), (x1, y1): (f64, f64)) -> usize {
+    if self.circles.is_empty() { return NONE; }
+    let test = next_test(&mut self.b.circle_seen, &mut self.b.circle_test);
+    let (dx, dy) = (x1 - x0, y1 - y0);
+    let length_squared = dx * dx + dy * dy;
+    let mut near = std::mem::take(&mut self.b.near);
+    self.circle_cells.near(x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1), &mut near);
+    let mut blocking = NONE;
+    for &circle in &near {
+      let circle = circle as usize;
+      if self.b.circle_seen[circle] == test { continue; }
+      self.b.circle_seen[circle] = test;
+      let (cx, cy, radius) = self.circles[circle];
+      let t = if length_squared == 0.0 { 0.0 } else { (((cx - x0) * dx + (cy - y0) * dy) / length_squared).clamp(0.0, 1.0) };
+      let (ex, ey) = (x0 + t * dx - cx, y0 + t * dy - cy);
+      if ex * ex + ey * ey < radius * radius { blocking = circle; break; }
     }
-    let n = self.x.len();
-    self.link(grid, w, h, end, false);
-    self.link(grid, w, h, start, true);
-    self.distances.clear();
-    self.distances.resize(n, f64::INFINITY);
-    self.parents.clear();
-    self.parents.resize(n, NONE);
-    self.closed.clear();
-    self.closed.resize(n, false);
-    let heuristic = |graph: &NavigationGraph, node: usize| length(end_x - graph.x[node], end_y - graph.y[node]);
+    self.b.near = near;
+    blocking
+  }
+
+  // Octagon corners around the circle, half a pixel out where free; its edges stay clear of the circle.
+  fn activate(&mut self, circle: usize) {
+    if self.b.active[circle] { return; }
+    self.b.active[circle] = true;
+    let (cx, cy, r) = self.circles[circle];
+    let corner = PI / 4.0;
+    let radius = r / (corner / 2.0).cos();
+    let vertex = |k: i32| (cx + radius * (k as f64 * corner).cos(), cy + radius * (k as f64 * corner).sin());
+    for k in 0..8 {
+      let (nx, ny) = (cx + (radius + 0.5) * (k as f64 * corner).cos(), cy + (radius + 0.5) * (k as f64 * corner).sin());
+      if nx < 0.0 || ny < 0.0 || nx >= self.w as f64 || ny >= self.h as f64 { continue; }
+      if self.grid[ny.floor() as usize * self.w + nx.floor() as usize] == 1 || self.in_circle((nx, ny)) { continue; }
+      self.b.nodes.push((nx, ny), vertex(k), vertex(k - 1), vertex(k + 1));
+      for list in [&mut self.b.to_end, &mut self.b.from_start, &mut self.b.distances] { list.push(f64::INFINITY); }
+      self.b.end_via.push(None);
+      self.b.start_via.push(None);
+      self.b.parents.push(NONE);
+      self.b.closed.push(false);
+      self.b.pending.push_back(self.b.nodes.len() - 1);
+    }
+  }
+
+  // Whether the segment crosses no outline and no circle; a circle in the way comes into play.
+  fn clear(&mut self, from: (f64, f64), to: (f64, f64)) -> bool {
+    if !self.walls_visible(from, to) { return false; }
+    let circle = self.blocking_circle(from, to);
+    if circle != NONE { self.activate(circle); }
+    circle == NONE
+  }
+
+  fn position(&self, node: usize) -> (f64, f64) { (self.b.nodes.x[node], self.b.nodes.y[node]) }
+
+  // Links a point, through an escape point extra pixels away if given, to the node if it sees it. Adds
+  // the node's component to components when it sees it past the walls, circles or not.
+  fn reach_node(&mut self, to_end: bool, point: (f64, f64), extra: f64, escape: Option<(f64, f64)>, node: usize, components: &mut Option<&mut HashSet<u32>>) -> bool {
+    let (nx, ny) = self.position(node);
+    let distance = extra + length(nx - point.0, ny - point.1);
+    let cost = if to_end { self.b.to_end[node] } else { self.b.from_start[node] };
+    if distance >= cost || !self.b.nodes.wraps(node, point) || !self.walls_visible(point, (nx, ny)) { return false; }
+    if let Some(set) = components && node < self.graph.nodes.len() { set.insert(self.graph.components[node]); }
+    let circle = self.blocking_circle(point, (nx, ny));
+    if circle != NONE {
+      self.activate(circle);
+      return false;
+    }
+    if to_end { self.b.to_end[node] = distance; self.b.end_via[node] = escape; } else { self.b.from_start[node] = distance; self.b.start_via[node] = escape; }
+    true
+  }
+
+  #[allow(clippy::too_many_arguments)]
+  fn reach(&mut self, to_end: bool, point: (f64, f64), extra: f64, escape: Option<(f64, f64)>, from: usize, to: usize, components: &mut Option<&mut HashSet<u32>>) -> bool {
+    let mut linked = false;
+    for node in from..to { linked |= self.reach_node(to_end, point, extra, escape, node, components); }
+    linked
+  }
+
+  // the same for the graph's nodes within MOVING_REACH and the temporary ones: for the many escape
+  // points around a point stuck in a corner
+  fn reach_near(&mut self, to_end: bool, (ex, ey): (f64, f64), extra: f64, components: &mut Option<&mut HashSet<u32>>) {
+    let mut near = Vec::new();
+    self.graph.node_cells.near(ex - MOVING_REACH, ey - MOVING_REACH, ex + MOVING_REACH, ey + MOVING_REACH, &mut near);
+    for node in near { self.reach_node(to_end, (ex, ey), extra, Some((ex, ey)), node as usize, components); }
+    let (n, total) = (self.graph.nodes.len(), self.b.nodes.len());
+    self.reach(to_end, (ex, ey), extra, Some((ex, ey)), n, total, components);
+  }
+
+  // A point a few pixels off the outline nearest to (px, py), or None: pushed away from it twice, in case
+  // the first push lands within another outline, as in a corner.
+  fn push_off(&mut self, (px, py): (f64, f64)) -> Option<(f64, f64)> {
+    let (mut ex, mut ey) = (px, py);
+    let mut near = Vec::new();
+    for _ in 0..2 {
+      let (mut nearest, mut away_x, mut away_y) = (f64::INFINITY, 0.0, 0.0);
+      self.graph.wall_cells.near(ex - 4.0, ey - 4.0, ex + 4.0, ey + 4.0, &mut near);
+      for &wall in &near {
+        let s = &self.graph.walls[4 * wall as usize..4 * wall as usize + 4];
+        let (dx, dy) = (s[2] - s[0], s[3] - s[1]);
+        let squared = dx * dx + dy * dy;
+        let t = (((ex - s[0]) * dx + (ey - s[1]) * dy) / if squared == 0.0 { 1.0 } else { squared }).clamp(0.0, 1.0);
+        let (cx, cy) = (s[0] + t * dx, s[1] + t * dy);
+        let distance = length(ex - cx, ey - cy);
+        if distance >= nearest { continue; }
+        // away from the wall: from its closest point, or along its normal (right of the walk) when on it
+        if distance > 1e-9 {
+          (nearest, away_x, away_y) = (distance, (ex - cx) / distance, (ey - cy) / distance);
+        } else {
+          (nearest, away_x, away_y) = (0.0, -dy / length(dx, dy), dx / length(dx, dy));
+        }
+      }
+      if nearest == f64::INFINITY || nearest >= 2.5 { break; }
+      ex += away_x * (2.5 - nearest);
+      ey += away_y * (2.5 - nearest);
+    }
+    if (ex == px && ey == py) || !is_segment_clear(self.grid, self.w, self.h, px, py, ex, ey) || self.in_circle((ex, ey)) { return None; }
+    if self.blocking_circle((px, py), (ex, ey)) != NONE { None } else { Some((ex, ey)) }
+  }
+
+  // Links a point to the nodes it sees. A point within the tolerance of a wall may be inside its
+  // outline and see no node. It then links through an escape point pushed off that outline, or failing
+  // that, through escape points around it, reached over free pixels; returns the escapes, so temporary
+  // nodes can link through them too.
+  fn link(&mut self, to_end: bool, point: (f64, f64), components: &mut HashSet<u32>) -> Vec<(f64, f64)> {
+    let mut components = Some(components);
+    let total = self.b.nodes.len();
+    if self.reach(to_end, point, 0.0, None, 0, total, &mut components) { return Vec::new(); }
+    if let Some(pushed) = self.push_off(point) {
+      let total = self.b.nodes.len();
+      if self.reach(to_end, pushed, length(pushed.0 - point.0, pushed.1 - point.1), Some(pushed), 0, total, &mut components) { return vec![pushed]; }
+    }
+    let mut escapes = Vec::new();
+    for radius in [2.0, 4.0, 8.0] {
+      for k in 0..16 {
+        let angle = k as f64 * PI / 8.0;
+        let escape = (point.0 + radius * angle.cos(), point.1 + radius * angle.sin());
+        if !is_segment_clear(self.grid, self.w, self.h, point.0, point.1, escape.0, escape.1) || self.in_circle(escape) { continue; }
+        if self.blocking_circle(point, escape) != NONE { continue; }
+        escapes.push(escape);
+        self.reach_near(to_end, escape, radius, &mut components);
+      }
+      let via = if to_end { &self.b.end_via } else { &self.b.start_via };
+      if via.iter().any(|escape| escape.is_some()) { break; }
+    }
+    escapes
+  }
+
+  fn heuristic(&self, node: usize) -> f64 {
+    let (x, y) = self.position(node);
+    length(self.end.0 - x, self.end.1 - y)
+  }
+
+  fn relax(&mut self, heap: &mut BinaryHeap<Entry>, node: usize, next: usize, cost: f64) {
+    let distance = self.b.distances[node] + cost;
+    if self.b.closed[next] || distance >= self.b.distances[next] { return; }
+    self.b.distances[next] = distance;
+    self.b.parents[next] = node;
+    heap.push(Entry(distance + self.heuristic(next), next));
+  }
+
+  fn start_at(&mut self, heap: &mut BinaryHeap<Entry>, node: usize) {
+    if self.b.from_start[node] >= self.b.distances[node] { return; }
+    self.b.distances[node] = self.b.from_start[node];
+    self.b.parents[node] = NONE;
+    heap.push(Entry(self.b.distances[node] + self.heuristic(node), node));
+  }
+
+  // Links temporary nodes that came into play to start and end (directly or through their escapes);
+  // linking may bring more circles into play.
+  fn link_pending(&mut self, heap: &mut BinaryHeap<Entry>, end_escapes: &[(f64, f64)], start_escapes: &[(f64, f64)]) {
+    while let Some(node) = self.b.pending.pop_front() {
+      for (to_end, point, escapes) in [(true, self.end, end_escapes), (false, self.start, start_escapes)] {
+        if self.reach(to_end, point, 0.0, None, node, node + 1, &mut None) { continue; }
+        for &escape in escapes {
+          self.reach(to_end, escape, length(escape.0 - point.0, escape.1 - point.1), Some(escape), node, node + 1, &mut None);
+        }
+      }
+      self.start_at(heap, node);
+    }
+  }
+
+  // Links between a node and nearby ones: the graph's nodes in node_cells for a temporary node, or the
+  // temporary nodes for any node.
+  fn relax_near(&mut self, heap: &mut BinaryHeap<Entry>, node: usize, temporary: bool) {
+    let (nx, ny) = self.position(node);
+    let candidates: Vec<usize> = if temporary {
+      (self.graph.nodes.len()..self.b.nodes.len()).collect()
+    } else {
+      let mut near = Vec::new();
+      self.graph.node_cells.near(nx - MOVING_REACH, ny - MOVING_REACH, nx + MOVING_REACH, ny + MOVING_REACH, &mut near);
+      near.into_iter().map(|node| node as usize).collect()
+    };
+    for next in candidates {
+      if next == node || self.b.closed[next] { continue; }
+      let (x, y) = self.position(next);
+      let cost = length(x - nx, y - ny);
+      if cost > MOVING_REACH || self.b.distances[node] + cost >= self.b.distances[next] { continue; }
+      if !self.b.nodes.wraps(next, (nx, ny)) || !self.b.nodes.wraps(node, (x, y)) || !self.clear((x, y), (nx, ny)) { continue; }
+      self.relax(heap, node, next, cost);
+    }
+  }
+
+  fn run(&mut self) -> Vec<f64> {
+    let (start, end, n) = (self.start, self.end, self.graph.nodes.len());
+    self.b.nodes.truncate_to(&self.graph.nodes);
+    for (list, value) in [(&mut self.b.to_end, f64::INFINITY), (&mut self.b.from_start, f64::INFINITY), (&mut self.b.distances, f64::INFINITY)] {
+      list.clear();
+      list.resize(n, value);
+    }
+    for list in [&mut self.b.end_via, &mut self.b.start_via] { list.clear(); list.resize(n, None); }
+    self.b.parents.clear();
+    self.b.parents.resize(n, NONE);
+    self.b.closed.clear();
+    self.b.closed.resize(n, false);
+    self.b.active.clear();
+    self.b.active.resize(self.circles.len(), false);
+    self.b.circle_seen.clear();
+    self.b.circle_seen.resize(self.circles.len(), 0);
+    self.b.pending.clear();
+
+    if self.walls_visible(start, end) || is_segment_clear(self.grid, self.w, self.h, start.0, start.1, end.0, end.1) {
+      let circle = self.blocking_circle(start, end);
+      if circle == NONE { return vec![start.0, start.1, end.0, end.1]; }
+      self.activate(circle);
+    }
+    // start and end must see the same component past the walls: circles only take paths away (a point
+    // that sees none of the graph's nodes, as on an open field, may still get around circles)
+    let (mut end_components, mut start_components) = (HashSet::new(), HashSet::new());
+    let end_escapes = self.link(true, end, &mut end_components);
+    let start_escapes = self.link(false, start, &mut start_components);
+    if !end_components.is_empty() && !start_components.is_empty() && start_components.is_disjoint(&end_components) { return Vec::new(); }
+
     let mut heap = BinaryHeap::new();
-    for node in 0..n {
-      if self.from_start[node] == f64::INFINITY { continue; }
-      self.distances[node] = self.from_start[node];
-      heap.push(Entry(self.distances[node] + heuristic(self, node), node));
-    }
+    for node in 0..n { self.start_at(&mut heap, node); }
+    self.link_pending(&mut heap, &end_escapes, &start_escapes);
 
     let (mut best, mut last) = (f64::INFINITY, NONE); // the shortest way to the end found so far, via node last
     while let Some(Entry(_, node)) = heap.pop() {
-      if self.closed[node] { continue; }
-      if self.distances[node] + heuristic(self, node) >= best { break; } // nothing left can beat it
-      self.closed[node] = true;
-      if self.distances[node] + self.to_end[node] < best {
-        best = self.distances[node] + self.to_end[node];
+      if self.b.closed[node] { continue; }
+      if self.b.distances[node] + self.heuristic(node) >= best { break; } // nothing left can beat it
+      self.b.closed[node] = true;
+      if self.b.distances[node] + self.b.to_end[node] < best {
+        best = self.b.distances[node] + self.b.to_end[node];
         last = node;
       }
-      for k in self.offsets[node]..self.offsets[node + 1] {
-        let next = self.targets[k] as usize;
-        let distance = self.distances[node] + self.costs[k];
-        if self.closed[next] || distance >= self.distances[next] { continue; }
-        self.distances[next] = distance;
-        self.parents[next] = node;
-        heap.push(Entry(distance + heuristic(self, next), next));
+      if node < n {
+        for k in self.graph.offsets[node]..self.graph.offsets[node + 1] {
+          let next = self.graph.targets[k] as usize;
+          if self.b.closed[next] || self.b.distances[node] + self.graph.costs[k] >= self.b.distances[next] { continue; }
+          let circle = self.blocking_circle(self.position(node), self.position(next));
+          if circle != NONE {
+            self.activate(circle);
+            continue;
+          }
+          self.relax(&mut heap, node, next, self.graph.costs[k]);
+        }
+      } else {
+        self.relax_near(&mut heap, node, false);
       }
+      self.link_pending(&mut heap, &end_escapes, &start_escapes);
+      if self.b.nodes.len() > n { self.relax_near(&mut heap, node, true); } // few: only circles that came into play
     }
     if last == NONE { return Vec::new(); }
-    let mut path = vec![(end_x, end_y)];
-    if let Some(escape) = self.end_via[last] { path.push(escape); }
-    let mut first = last;
-    let mut node = last;
+    let mut path = vec![end];
+    if let Some(escape) = self.b.end_via[last] { path.push(escape); }
+    let (mut first, mut node) = (last, last);
     while node != NONE {
-      path.push((self.x[node], self.y[node]));
+      path.push(self.position(node));
       first = node;
-      node = self.parents[node];
+      node = self.b.parents[node];
     }
-    if let Some(escape) = self.start_via[first] { path.push(escape); }
-    path.push((start_x, start_y));
+    if let Some(escape) = self.b.start_via[first] { path.push(escape); }
+    path.push(start);
     path.iter().rev().flat_map(|&(x, y)| [x, y]).collect()
   }
 }
@@ -459,7 +796,7 @@ mod tests {
   fn goes_straight_when_nothing_is_in_the_way() {
     let grid = vec![0; 100];
     let mut graph = NavigationGraph::build(&grid, 10, 10, 1.5);
-    assert_eq!(graph.search(&grid, 10, 10, (1.5, 1.5), (8.5, 7.5)), vec![1.5, 1.5, 8.5, 7.5]);
+    assert_eq!(graph.search(&grid, 10, 10, (1.5, 1.5), (8.5, 7.5), &[]), vec![1.5, 1.5, 8.5, 7.5]);
   }
 
   #[test]
@@ -468,7 +805,7 @@ mod tests {
     let mut grid = vec![0; size * size];
     for y in 0..30 { for x in 18..22 { grid[y * size + x] = 1; } }
     let mut graph = NavigationGraph::build(&grid, size, size, 1.5);
-    let path = graph.search(&grid, size, size, (5.5, 5.5), (35.5, 5.5));
+    let path = graph.search(&grid, size, size, (5.5, 5.5), (35.5, 5.5), &[]);
     assert_eq!(path.len(), 8); // start, around both corners at the wall's end, end
     let shortest = 2.0 * 13f64.hypot(24.5) + 4.0;
     assert!(length(&path) > shortest - 1.0 && length(&path) < shortest + 6.0, "{}", length(&path));
@@ -480,9 +817,35 @@ mod tests {
     let mut grid = vec![0; size * size];
     for y in 10..30 { for x in 10..30 { grid[y * size + x] = 1; } }
     let mut graph = NavigationGraph::build(&grid, size, size, 1.5);
-    let first = graph.search(&grid, size, size, (5.5, 20.5), (35.5, 20.5));
-    graph.search(&grid, size, size, (20.5, 5.5), (20.5, 35.5));
-    assert_eq!(graph.search(&grid, size, size, (5.5, 20.5), (35.5, 20.5)), first);
+    let first = graph.search(&grid, size, size, (5.5, 20.5), (35.5, 20.5), &[]);
+    graph.search(&grid, size, size, (20.5, 5.5), (20.5, 35.5), &[]);
+    assert_eq!(graph.search(&grid, size, size, (5.5, 20.5), (35.5, 20.5), &[]), first);
     assert!(graph.node_count() == 4 && graph.edge_count() > 0);
+  }
+
+  #[test]
+  fn goes_around_a_moving_circle_close_to_the_shortest_way() {
+    let grid = vec![0; 100 * 100];
+    let mut graph = NavigationGraph::build(&grid, 100, 100, 1.5);
+    let path = graph.search(&grid, 100, 100, (20.0, 50.0), (80.0, 50.0), &[(50.0, 50.0, 10.0)]);
+    for point in path.chunks(2).zip(path.chunks(2).skip(1)) {
+      let ((x0, y0), (x1, y1)) = ((point.0[0], point.0[1]), (point.1[0], point.1[1]));
+      let (dx, dy) = (x1 - x0, y1 - y0);
+      let t = (((50.0 - x0) * dx + (50.0 - y0) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+      assert!((x0 + t * dx - 50.0).hypot(y0 + t * dy - 50.0) >= 10.0 - 1e-9);
+    }
+    // two tangents of √(30² - 10²) and the arc between them; the octagon's corners stick out a little
+    let shortest = 2.0 * 800f64.sqrt() + 10.0 * (std::f64::consts::PI - 2.0 * (1.0f64 / 3.0).acos());
+    assert!(length(&path) > shortest && length(&path) < shortest * 1.05, "{}", length(&path));
+  }
+
+  #[test]
+  fn finds_no_path_through_circles_closing_a_corridor() {
+    let size = 60;
+    let mut grid = vec![0; size * size];
+    for y in 0..size { for x in 0..size { if !(25..35).contains(&y) { grid[y * size + x] = 1; } } }
+    let mut graph = NavigationGraph::build(&grid, size, size, 1.5);
+    assert!(graph.search(&grid, size, size, (5.5, 30.0), (55.5, 30.0), &[(30.0, 30.0, 6.0)]).is_empty());
+    assert_eq!(graph.search(&grid, size, size, (5.5, 30.0), (55.5, 30.0), &[(30.0, 25.0, 3.0)]), vec![5.5, 30.0, 55.5, 30.0]);
   }
 }
