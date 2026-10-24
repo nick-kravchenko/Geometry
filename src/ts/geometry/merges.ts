@@ -1,21 +1,21 @@
 import { Point, Rectangle } from './shapes';
-import { rectToSides } from './conversions';
+import { rectangleToSides } from './conversions';
 
-export function mergeRectanglesIfIntersect(rect1: Rectangle, rect2: Rectangle): Rectangle | null {
-  const width1: number = rect1[1];
-  const height1: number = rect1[2];
+export function mergeRectanglesIfIntersect(rectangle1: Rectangle, rectangle2: Rectangle): Rectangle | null {
+  const width1: number = rectangle1[1];
+  const height1: number = rectangle1[2];
   const sides1: {
     bottom: number,
     left: number,
     right: number,
     top: number,
-  } = rectToSides(rect1);
+  } = rectangleToSides(rectangle1);
   const sides2: {
     bottom: number,
     left: number,
     right: number,
     top: number,
-  } = rectToSides(rect2);
+  } = rectangleToSides(rectangle2);
   const intersects: boolean = sides1.left <= sides2.right
     && sides1.right >= sides2.left
     && sides1.top <= sides2.bottom
@@ -34,20 +34,20 @@ export function mergeRectanglesIfIntersect(rect1: Rectangle, rect2: Rectangle): 
   return null;
 }
 
-export function mergeRectanglesInArray(obstacles: Rectangle[]): Rectangle[] {
-  const cloneObstacles: Rectangle[] = Array.from(obstacles);
+export function mergeRectanglesInArray(rectangles: Rectangle[]): Rectangle[] {
+  const cloneRectangles: Rectangle[] = Array.from(rectangles);
   let merged: boolean = true;
   while (merged) {
     merged = false;
-    for (let i: number = 0; i < cloneObstacles.length; i++) {
-      for (let j: number = i + 1; j < cloneObstacles.length; j++) {
-        const rect1: Rectangle|undefined = cloneObstacles[i];
-        const rect2: Rectangle|undefined = cloneObstacles[j];
-        if (!rect1 || !rect2) break;
-        const mergedRectangle: Rectangle|null = mergeRectanglesIfIntersect(rect1, rect2);
+    for (let i: number = 0; i < cloneRectangles.length; i++) {
+      for (let j: number = i + 1; j < cloneRectangles.length; j++) {
+        const rectangle1: Rectangle|undefined = cloneRectangles[i];
+        const rectangle2: Rectangle|undefined = cloneRectangles[j];
+        if (!rectangle1 || !rectangle2) break;
+        const mergedRectangle: Rectangle|null = mergeRectanglesIfIntersect(rectangle1, rectangle2);
         if (mergedRectangle) {
-          cloneObstacles.splice(j, 1); // Remove rect2
-          cloneObstacles.splice(i, 1, mergedRectangle); // Replace rect1 with mergedRectangle
+          cloneRectangles.splice(j, 1); // Remove rectangle2
+          cloneRectangles.splice(i, 1, mergedRectangle); // Replace rectangle1 with mergedRectangle
           merged = true;
           break;
         }
@@ -55,5 +55,5 @@ export function mergeRectanglesInArray(obstacles: Rectangle[]): Rectangle[] {
       if (merged) break;
     }
   }
-  return cloneObstacles;
+  return cloneRectangles;
 }

@@ -2,12 +2,12 @@ import { Point, Rectangle } from './geometry';
 
 interface Field {
   cellsNumbers: number[],
-  cellsCoords: number[][],
+  cellsCoordinates: number[][],
   blockedCellsNumbers: number[],
-  blockedCellsCoords: number[][],
-  startPointCoords: number[],
+  blockedCellsCoordinates: number[][],
+  startPointCoordinates: number[],
   startPointNumber: number,
-  endPointCoords: number[],
+  endPointCoordinates: number[],
   endPointNumber: number,
 }
 
@@ -20,9 +20,9 @@ export interface Data {
   cellsY: number,
   cellWidth: number,
   cellHeight: number,
-  startPointCoords: Point,
+  startPointCoordinates: Point,
   startPointNumber: number,
-  endPointCoords: Point,
+  endPointCoordinates: Point,
   endPointNumber: number,
   squares: Rectangle[],
   field: Field,
@@ -40,26 +40,26 @@ export function getData(): Data {
   const cellsY = 18;
   const cellWidth = ~~(w / cellsX);
   const cellHeight = ~~(h / cellsY);
-  let startPointCoords: Point = [~~(8 * cellWidth + cellWidth * .5), ~~(8 * cellHeight + cellHeight * .5)];
-  let startPointNumber = startPointCoords[0] + startPointCoords[1] * w;
-  let endPointCoords: Point = [~~(11 * cellWidth + cellWidth * .5), ~~(13 * cellHeight + cellHeight * .5)];
-  let endPointNumber = endPointCoords[0] + endPointCoords[1] * w;
+  let startPointCoordinates: Point = [~~(8 * cellWidth + cellWidth * .5), ~~(8 * cellHeight + cellHeight * .5)];
+  let startPointNumber = startPointCoordinates[0] + startPointCoordinates[1] * w;
+  let endPointCoordinates: Point = [~~(11 * cellWidth + cellWidth * .5), ~~(13 * cellHeight + cellHeight * .5)];
+  let endPointNumber = endPointCoordinates[0] + endPointCoordinates[1] * w;
   let squares: Rectangle[] = [];
   let blockedCellsUint8Array = new Uint8Array(w * h).fill(0b0);
   const field: Field = {
     cellsNumbers: [],
-    cellsCoords: [],
+    cellsCoordinates: [],
     blockedCellsNumbers: [],
-    blockedCellsCoords: [],
-    startPointCoords: startPointCoords,
+    blockedCellsCoordinates: [],
+    startPointCoordinates: startPointCoordinates,
     startPointNumber: startPointNumber,
-    endPointCoords: endPointCoords,
+    endPointCoordinates: endPointCoordinates,
     endPointNumber: endPointNumber,
   };
   for (let y = 0; y < cellsY; y++) {
     for (let x = 0; x < cellsX; x++) {
       field.cellsNumbers.push(x + y * cellsX);
-      field.cellsCoords.push([x * cellWidth, y * cellHeight]);
+      field.cellsCoordinates.push([x * cellWidth, y * cellHeight]);
     }
   }
   function addSquare(x: number, y: number): void {
@@ -67,7 +67,7 @@ export function getData(): Data {
     const square: Rectangle = [point, cellWidth, cellHeight];
     squares.push(square);
     field.blockedCellsNumbers.push(x + y * cellsX);
-    field.blockedCellsCoords.push([x * cellWidth, y * cellHeight]);
+    field.blockedCellsCoordinates.push([x * cellWidth, y * cellHeight]);
   }
   function setSquares(): void {
     squares = [];
@@ -121,9 +121,9 @@ export function getData(): Data {
     cellsY,
     cellWidth,
     cellHeight,
-    startPointCoords,
+    startPointCoordinates,
     startPointNumber,
-    endPointCoords,
+    endPointCoordinates,
     endPointNumber,
     squares,
     field,

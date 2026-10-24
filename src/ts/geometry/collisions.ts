@@ -4,7 +4,7 @@ import {
   Rectangle,
   Circle,
 } from './shapes';
-import { rectToLines } from './conversions';
+import { rectangleToLines } from './conversions';
 import { pointToLineDistance, pointToPointDistance } from './distances';
 
 export function pointToPointCollision(point1: Point, point2: Point): boolean {
@@ -17,9 +17,9 @@ export function pointToLineCollision(point: Point, line: Line, threshold: number
   return pointToLineDistance(point, line) < threshold;
 }
 
-export function pointToRectangleCollision(point: Point, rect: Rectangle): boolean {
+export function pointToRectangleCollision(point: Point, rectangle: Rectangle): boolean {
   const [px, py]: Point = point;
-  const [[rx, ry], width, height]: Rectangle = rect;
+  const [[rx, ry], width, height]: Rectangle = rectangle;
   return (px > rx && px < rx + width)
     && (py > ry && py < ry + height);
 }
@@ -29,14 +29,14 @@ export function pointToCircleCollision(point: Point, circle: Circle): boolean {
   return pointToPointDistance(point, circleCenter) < circleRadius;
 }
 
-export function lineToLineCollisionPoints(intersectLine: Line, intersectedLine: Line): Point | null {
-  const [intersectLineStart, intersectLineEnd]: [Point, Point] = intersectLine;
-  const [x1, y1]: [number, number] = intersectLineStart;
-  const [x2, y2]: [number, number] = intersectLineEnd;
+export function lineToLineCollisionPoint(line1: Line, line2: Line): Point | null {
+  const [line1Start, line1End]: [Point, Point] = line1;
+  const [x1, y1]: [number, number] = line1Start;
+  const [x2, y2]: [number, number] = line1End;
 
-  const [intersectedLineStart, intersectedLineEnd]: [Point, Point] = intersectedLine;
-  const [x3, y3]: [number, number] = intersectedLineStart;
-  const [x4, y4]: [number, number] = intersectedLineEnd;
+  const [line2Start, line2End]: [Point, Point] = line2;
+  const [x3, y3]: [number, number] = line2Start;
+  const [x4, y4]: [number, number] = line2End;
 
   const denominator: number = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
   if (denominator === 0) return null;  // Lines are parallel or coincident
@@ -55,33 +55,35 @@ export function lineToLineCollisionPoints(intersectLine: Line, intersectedLine: 
   return null;
 }
 
-export function lineToRectangleCollisionPoints(line: Line, rect: Rectangle): Point[] {
+export function lineToRectangleCollisionPoints(line: Line, rectangle: Rectangle): Point[] {
   const collisions: Point[] = [];
-  const rectLines: [Line, Line, Line, Line] = rectToLines(rect);
-  for (const rectLine of rectLines) {
-    const collisionPoint: Point|null = lineToLineCollisionPoints(line, rectLine);
+  const rectangleLines: [Line, Line, Line, Line] = rectangleToLines(rectangle);
+  for (const rectangleLine of rectangleLines) {
+    const collisionPoint: Point|null = lineToLineCollisionPoint(line, rectangleLine);
     if (collisionPoint) {
       collisions.push(collisionPoint);
     }
   }
-  return collisions;
+  return uniquePoints(collisions); // a line through a corner hits two edges at the same point
 }
 
 export function lineToCircleCollisionPoints(line: Line, circle: Circle): Point[] {
-  const collisions: Point[] = [];
   const [lineStart, lineEnd]: [Point, Point] = line;
   const [lineStartX, lineStartY]: Point = lineStart;
-  const [lineEndX]: Point = lineEnd;
+  const [lineEndX, lineEndY]: Point = lineEnd;
   const [[circleX, circleY], circleRadius]: [Point, number] = circle;
 
-  const dx: number  = lineEndX - lineStartX;
-  const dy: number = lineEndX - lineStartX;
+  const dx: number = lineEndX - lineStartX;
+  const dy: number = lineEndY - lineStartY;
   const fx: number = lineStartX - circleX;
   const fy: number = lineStartY - circleY;
 
+  // solve |start + t * d - center| = radius for t: a*t^2 + b*t + c = 0
   const a: number = dx**2 + dy**2;
-  const b: number = fx * dx + fy * dy;
+  const b: number = 2 * (fx * dx + fy * dy);
   const c: number = fx**2 + fy**2 - circleRadius**2;
+
+  if (a === 0) return []; // start and end points of the line are the same
 
   const discriminant: number = b**2 - 4 * a * c;
 
@@ -91,61 +93,70 @@ export function lineToCircleCollisionPoints(line: Line, circle: Circle): Point[]
   const t1: number = (-b - discriminantSqrt) / (2 * a);
   const t2: number = (-b + discriminantSqrt) / (2 * a);
 
-  if (t1 > 0 && t1 < 1) {
-    collisions.push([
-      lineStartX + t1 * dx,
-      lineStartY + t1 * dy,
-    ]);
-  }
-  if (t2 > 0 && t2 < 1) {
-    collisions.push([
-      lineStartX + t2 * dx,
-      lineStartY + t2 * dy,
-    ]);
+  const collisions: Point[] = [];
+  // only points within the segment; a tangent line gives t1 === t2, so it counts once
+  for (const t of discriminant === 0 ? [t1] : [t1, t2]) {
+    if (t >= 0 && t <= 1) {
+      collisions.push([
+        lineStartX + t * dx,
+        lineStartY + t * dy,
+      ]);
+    }
   }
 
   return collisions;
 }
 
-export function rectToRectangleCollisionPoints(rect1: Rectangle, rect2: Rectangle): Point[] {
+export function rectangleToRectangleCollisionPoints(rectangle1: Rectangle, rectangle2: Rectangle): Point[] {
   const collisions: Point[] = [];
-  const lines: Line[] = rectToLines(rect1);
+  const lines: Line[] = rectangleToLines(rectangle1);
   for (const line of lines) {
-    const collisionPoints: Point[] = lineToRectangleCollisionPoints(line, rect2);
-    collisions.concat(collisionPoints);
+    collisions.push(...lineToRectangleCollisionPoints(line, rectangle2));
   }
-  return collisions;
+  return uniquePoints(collisions); // edges sharing a corner report the same point twice
 }
 
-export function rectToCircleCollisionPoints(rect: Rectangle, circle: Circle): Point[] {
+export function rectangleToCircleCollisionPoints(rectangle: Rectangle, circle: Circle): Point[] {
   const collisions: Point[] = [];
-  const lines: Line[] = rectToLines(rect);
+  const lines: Line[] = rectangleToLines(rectangle);
   for (const line of lines) {
-    const collisionPoints: Point[] = lineToCircleCollisionPoints(line, circle);
-    collisions.concat(collisionPoints);
+    collisions.push(...lineToCircleCollisionPoints(line, circle));
   }
-  return collisions;
+  return uniquePoints(collisions); // edges sharing a corner report the same point twice
 }
 
 export function circleToCircleCollisionPoints(circle1: Circle, circle2: Circle): Point[] {
-  const collisions: Point[] = [];
   const [[x1, y1], r1]: [Point, number] = circle1;
   const [[x2, y2], r2]: [Point, number] = circle2;
-  const dx: number = x1 - x2;
-  const dy: number = y1 - y2;
+  // direction from the first center to the second
+  const dx: number = x2 - x1;
+  const dy: number = y2 - y1;
   const d: number = pointToPointDistance([x1, y1], [x2, y2]);
 
-  if (d < r1 + r2) {
-    const a: number = (r1**2 - r2**2 + d**2) / (2 * d);
-    const h: number = Math.sqrt(r1**2 - a**2);
-    const px: number = x1 + a * (dx / d);
-    const py: number = y1 + a * (dy / d);
-    const offsetX: number = -h * (dy / d);
-    const offsetY: number = -h * (dx / d);
+  if (d === 0) return []; // concentric: no points, or infinitely many for identical circles
+  if (d > r1 + r2) return []; // too far apart
+  if (d < Math.abs(r1 - r2)) return []; // one circle is inside the other
 
-    collisions.push([px + offsetX, py - offsetY]);
-    collisions.push([px - offsetX, py + offsetY]);
-  }
+  // a - distance from the first center to the chord through both points, h - half the chord length
+  const a: number = (r1**2 - r2**2 + d**2) / (2 * d);
+  const h: number = Math.sqrt(Math.max(0, r1**2 - a**2)); // clamp rounding error for tangent circles
+  const px: number = x1 + a * (dx / d);
+  const py: number = y1 + a * (dy / d);
 
-  return collisions;
+  if (h === 0) return [[px, py]]; // tangent circles touch at one point
+
+  const offsetX: number = h * (dy / d);
+  const offsetY: number = h * (dx / d);
+
+  return [
+    [px + offsetX, py - offsetY],
+    [px - offsetX, py + offsetY],
+  ];
+}
+
+function uniquePoints(points: Point[]): Point[] {
+  const epsilon: number = 1e-9;
+  return points.filter(([x, y]: Point, i: number) => points.findIndex(([otherX, otherY]: Point) => (
+    Math.abs(x - otherX) < epsilon && Math.abs(y - otherY) < epsilon
+  )) === i);
 }

@@ -34,10 +34,10 @@ src/
   ts/
     geometry/
       shapes.ts                 # Point, Line, Rectangle, Circle types
-      collisions.ts             # Collision detection (point/line/rect/circle)
+      collisions.ts             # Collision detection (point/line/rectangle/circle)
       distances.ts              # Distance calculations
       transformations.ts        # Translate, rotate, scale
-      conversions.ts            # Rect → lines/points/sides
+      conversions.ts            # Rectangle → lines/points/sides
       merges.ts                 # Rectangle merging
       geometry.test.ts          # Vitest suite
     pathfinding/
@@ -48,7 +48,7 @@ src/
     wasm/
       index.ts                  # Loads WASM module, runs algorithms, calls render
       render.ts                 # Canvas rendering
-    utils/                      # Helpers: clamp, debounce, coord conversion, batched cell fill
+    utils/                      # Helpers: clamp, debounce, coordinate conversion, batched cell fill
 tests/
   app.rs                        # Rust integration tests for the WASM export
 ```
@@ -67,24 +67,24 @@ type Circle    = [Point, number]            // [center, radius]
 ### Collisions
 
 ```ts
-pointToPointCollision(p1, p2)
-pointToLineCollision(point, line, threshold?)
-pointToRectangleCollision(point, rect)
-pointToCircleCollision(point, circle)
-lineToLineCollisionPoints(line1, line2)       // → Point | null
-lineToRectangleCollisionPoints(line, rect)    // → Point[]
-lineToCircleCollisionPoints(line, circle)     // → Point[]
-rectToRectangleCollisionPoints(r1, r2)        // → Point[]
-rectToCircleCollisionPoints(rect, circle)     // → Point[]
-circleToCircleCollisionPoints(c1, c2)         // → Point[]
+pointToPointCollision(point1, point2)                    // → boolean
+pointToLineCollision(point, line, threshold?)            // → boolean
+pointToRectangleCollision(point, rectangle)              // → boolean
+pointToCircleCollision(point, circle)                    // → boolean
+lineToLineCollisionPoint(line1, line2)                   // → Point | null
+lineToRectangleCollisionPoints(line, rectangle)          // → Point[]
+lineToCircleCollisionPoints(line, circle)                // → Point[]
+rectangleToRectangleCollisionPoints(rectangle1, rectangle2) // → Point[]
+rectangleToCircleCollisionPoints(rectangle, circle)      // → Point[]
+circleToCircleCollisionPoints(circle1, circle2)          // → Point[]
 ```
 
 ### Distances
 
 ```ts
-pointToPointDistance(p1, p2)
+pointToPointDistance(point1, point2)
 pointToLineDistance(point, line)
-pointToRectangleDistance(point, rect)
+pointToRectangleDistance(point, rectangle)
 pointToCircleDistance(point, circle)
 ```
 
@@ -93,21 +93,21 @@ pointToCircleDistance(point, circle)
 ```ts
 translatePoint(point, dx, dy)
 translateLine(line, dx, dy)
-rotatePoint(point, origin, angle)   // angle in radians
+rotatePoint(point, origin, angle)           // angle in radians
 rotateLine(line, origin, angle)
-scalePoint(point, origin, sx, sy)
-scaleLine(line, origin, sx, sy)
+scalePoint(point, origin, scaleX, scaleY)
+scaleLine(line, origin, scaleX, scaleY)
 ```
 
 ### Conversions & merges
 
 ```ts
-rectToLines(rect)   // → [Line, Line, Line, Line]
-rectToPoints(rect)  // → { topLeft, topRight, bottomLeft, bottomRight }
-rectToSides(rect)   // → { top, right, bottom, left }
+rectangleToLines(rectangle)                 // → [Line, Line, Line, Line]
+rectangleToPoints(rectangle)                // → { topLeft, topRight, bottomLeft, bottomRight }
+rectangleToSides(rectangle)                 // → { top, right, bottom, left }
 
-mergeRectanglesIfIntersect(r1, r2)  // → Rectangle | null
-mergeRectanglesInArray(rects)        // → Rectangle[]  (iterative merge until stable)
+mergeRectanglesIfIntersect(rectangle1, rectangle2) // → Rectangle | null
+mergeRectanglesInArray(rectangles)          // → Rectangle[] (iterative merge until stable)
 ```
 
 ## Pathfinding
@@ -130,12 +130,12 @@ breadthFirstSearch(blockedCells, w, h, start, end): number[]
 breadthFirstSearchDiagonal(blockedCells, w, h, start, end): number[]
 ```
 
-### A\* — TypeScript (`AStarSearch`)
+### A\* — TypeScript (`aStarSearch`)
 
 Indexed binary min-heap open set keyed by f-score (decrease-key, no duplicate entries). Heuristic: Manhattan distance (4-dir) or Chebyshev distance (8-dir).
 
 ```ts
-AStarSearch(blockedCells, w, h, start, end, diagonal?): number[]
+aStarSearch(blockedCells, w, h, start, end, diagonal?): number[]
 ```
 
 ### BFS — Rust/WASM (`wasm_breadth_first_search`)

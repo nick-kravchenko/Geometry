@@ -11,8 +11,8 @@ export function render(
   ctx: CanvasRenderingContext2D | null,
   w: number,
   h: number,
-  startPointCoords: Point,
-  endPointCoords: Point,
+  startPointCoordinates: Point,
+  endPointCoordinates: Point,
   pathBFSWASM: ArrayLike<number>,
   pathBFSTS: number[],
   pathAStarTS: number[],
@@ -52,14 +52,14 @@ export function render(
 
   ctx.fillStyle = 'hsla(0, 50%, 50%, .5)';
   ctx.beginPath();
-  const [endPointX, endPointY] = endPointCoords;
+  const [endPointX, endPointY] = endPointCoordinates;
   ctx.arc(endPointX, endPointY, circleSize, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
   ctx.fillStyle = 'hsla(200, 50%, 50%, .5)';
   ctx.beginPath();
-  const [startPointX, startPointY] = startPointCoords;
+  const [startPointX, startPointY] = startPointCoordinates;
   ctx.arc(startPointX, startPointY, circleSize, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();

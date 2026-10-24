@@ -2,7 +2,7 @@ const UNSET: number = 0xFFFFFFFF;
 // move priorities, lower wins between equally short paths
 const HORIZONTAL: number = 0, VERTICAL: number = 1, DIAGONAL: number = 2;
 
-export function AStarSearch(
+export function aStarSearch(
   blockedCellsNumbers: Uint8Array,
   w: number,
   h: number,

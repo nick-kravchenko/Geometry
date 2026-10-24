@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { AStarSearch, breadthFirstSearch, breadthFirstSearchDiagonal } from '.';
+import { aStarSearch, breadthFirstSearch, breadthFirstSearchDiagonal } from '.';
 
 type Search = (grid: Uint8Array, w: number, h: number, start: number, end: number) => number[];
 
 const searches: [string, Search, boolean][] = [
   ['breadthFirstSearch', breadthFirstSearch, false],
   ['breadthFirstSearchDiagonal', breadthFirstSearchDiagonal, true],
-  ['AStarSearch', (g, w, h, s, e): number[] => AStarSearch(g, w, h, s, e, false), false],
-  ['AStarSearch (diagonal)', (g, w, h, s, e): number[] => AStarSearch(g, w, h, s, e, true), true],
+  ['aStarSearch', (g, w, h, s, e): number[] => aStarSearch(g, w, h, s, e, false), false],
+  ['aStarSearch (diagonal)', (g, w, h, s, e): number[] => aStarSearch(g, w, h, s, e, true), true],
 ];
 
 // mulberry32, deterministic so failures are reproducible
@@ -57,7 +57,7 @@ describe.each(searches)('%s', (_name: string, search: Search) => {
   });
 });
 
-describe('AStarSearch path shape', () => {
+describe('aStarSearch path shape', () => {
   // a staircase shows up as runs of a single step between two turns
   function countSingleStepRuns(path: number[]): number {
     let runs: number = 0;
@@ -88,7 +88,7 @@ describe('AStarSearch path shape', () => {
     const start: number = (8 * cell + cell / 2) * (w + 1);
     const end: number = (13 * cell + cell / 2) * w + 11 * cell + cell / 2;
     const bfs: number[] = breadthFirstSearch(grid, w, w, start, end);
-    const aStar: number[] = AStarSearch(grid, w, w, start, end, false);
+    const aStar: number[] = aStarSearch(grid, w, w, start, end, false);
     expect(aStar.length).toBe(bfs.length);
     expect(countSingleStepRuns(aStar)).toBe(0);
   });

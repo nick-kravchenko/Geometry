@@ -1,5 +1,5 @@
 import { getData } from '../get-data';
-import { AStarSearch, breadthFirstSearch } from '../pathfinding';
+import { aStarSearch, breadthFirstSearch } from '../pathfinding';
 import { render } from './render';
 
 function timed<T>(label: string, fn: () => T): [T, number] {
@@ -19,9 +19,9 @@ function start(module: typeof import('pkg')): void {
     w,
     h,
     startPointNumber,
-    startPointCoords,
+    startPointCoordinates,
     endPointNumber,
-    endPointCoords,
+    endPointCoordinates,
     blockedCellsUint8Array,
     cellsY,
     cellHeight,
@@ -32,14 +32,14 @@ function start(module: typeof import('pkg')): void {
 
   const [pathBFSWASM, timeBFSWASM] = timed('[WASM] BFS', () => wasm_breadth_first_search(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber));
   const [pathBFSTS, timeBFSTS] = timed('[TS] BFS', () => breadthFirstSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber));
-  const [pathAStarTS, timeAStarTS] = timed('[TS] A*', () => AStarSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false));
+  const [pathAStarTS, timeAStarTS] = timed('[TS] A*', () => aStarSearch(blockedCellsUint8Array, w, h, startPointNumber, endPointNumber, false));
 
   render(
     ctx,
     w,
     h,
-    startPointCoords,
-    endPointCoords,
+    startPointCoordinates,
+    endPointCoordinates,
     pathBFSWASM,
     pathBFSTS,
     pathAStarTS,

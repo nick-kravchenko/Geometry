@@ -4,8 +4,8 @@ import {
   Rectangle,
 } from './shapes';
 
-export function rectToLines(rect: Rectangle): [Line, Line, Line, Line] {
-  const [[x, y], width, height]: Rectangle = rect;
+export function rectangleToLines(rectangle: Rectangle): [Line, Line, Line, Line] {
+  const [[x, y], width, height]: Rectangle = rectangle;
   const point1: Point = [x, y]; // top-left
   const point2: Point = [x + width, y]; // top-right
   const point3: Point = [x, y + height]; // bottom-left
@@ -18,13 +18,13 @@ export function rectToLines(rect: Rectangle): [Line, Line, Line, Line] {
   ];
 }
 
-export function rectToPoints(rect: Rectangle): {
+export function rectangleToPoints(rectangle: Rectangle): {
   topLeft: Point,
   topRight: Point,
   bottomLeft: Point,
   bottomRight: Point,
 } {
-  const [[x, y], width, height]: Rectangle = rect;
+  const [[x, y], width, height]: Rectangle = rectangle;
   const point1: Point = [x, y]; // top-left
   const point2: Point = [x + width, y]; // top-right
   const point3: Point = [x, y + height]; // bottom-left
@@ -37,13 +37,13 @@ export function rectToPoints(rect: Rectangle): {
   };
 }
 
-export function rectToSides(rect: Rectangle): {
+export function rectangleToSides(rectangle: Rectangle): {
   bottom: number,
   left: number,
   right: number,
   top: number,
 } {
-  const [[x, y], width, height]: Rectangle = rect;
+  const [[x, y], width, height]: Rectangle = rectangle;
   return {
     bottom: y + height,
     left: x,
