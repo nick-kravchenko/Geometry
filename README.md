@@ -6,7 +6,7 @@ Interactive canvas demo of 2D geometry algorithms and grid pathfinding, running 
 
 ## What it does
 
-Renders a 972×972 canvas, centered and scaled to fit the screen, with an 18×18 grid of hand-placed obstacles. Pathfinding runs per pixel (944,784 cells), with obstacles padded by a quarter cell. Every frame, it searches from a start point to an end point with each visible algorithm and overlays the results:
+Renders a 972×972 canvas, centered and scaled to fit the screen, with one of several maps (a hand-made spiral, or a generated maze, rooms, scattered pillars or cave). Pathfinding runs per pixel (944,784 cells), with obstacles padded by a quarter cell. Every frame, it searches from a start point to an end point with each visible algorithm and overlays the results:
 
 - **[WASM] BFS** / **[TS] BFS** — breadth-first search
 - **[WASM] A\*** / **[TS] A\*** — A* search
@@ -18,10 +18,12 @@ All UI is drawn on the canvas:
 - **Drag** anywhere on the field to move the end point; every algorithm re-routes live.
 - **Legend** (top left): click a row to show or hide that path. Hidden algorithms are not run, so hiding the slow ones raises the frame rate. Each row shows the algorithm's time per frame, smoothed over recent frames.
 - **Controls** (top right): frames per second, and the **Diagonal** toggle (or press `D`), which switches BFS, A* and JPS (TS and WASM) to 8-directional movement. The visibility graph moves at any angle, so it only runs with Diagonal on; without it, its rows show `diagonal only`. With Diagonal on, **Graph overlay** (or press `G`) draws the graph the visibility graph searches: obstacle outlines, corner nodes, and edges between nodes that can be part of a shortest path.
+- **Map** (`M`) cycles through Spiral, Maze, Rooms, Scatter and Cave; **New layout** (`R`) generates another layout of the current map (all but Spiral are generated from a seed, and always start from the same one). Every map keeps start and end connected.
+- **Hide UI** (`H`) hides the legend and controls when they cover the map; a small button brings them back.
 
 Colors come from the [Ocean Sunset](https://coolors.co/001219-005f73-0a9396-94d2bd-e9d8a6-ee9b00-ca6702-bb3e03-ae2012-9b2226) palette by Coolors, one hue per algorithm: each WASM path is drawn wide and translucent under its thin TS twin.
 
-Shown and hidden algorithms and the Diagonal and Graph overlay settings are remembered in the browser (`localStorage`); the end point always starts at its default.
+Shown and hidden algorithms, the map, and the Diagonal, Graph overlay and Hide UI settings are remembered in the browser (`localStorage`); the end point and a map's random layout always start at their defaults.
 
 Timings come from `performance.now`, which browsers coarsen on pages that are not cross-origin isolated, such as GitHub Pages, so individual measurements there are whole milliseconds; the smoothing evens this out.
 
@@ -69,6 +71,8 @@ src/
       render.ts                 # Canvas rendering: field, paths, legend, controls panel
       palette.ts                # Colors (Coolors "Ocean Sunset" palette)
     utils/                      # Helpers: clamp, debounce, coordinate conversion, batched cell fill
+    maps.ts                     # Demo maps: spiral, maze, rooms, scatter, cave (seeded)
+    get-data.ts                 # Canvas setup; scales a map up to a padded pixel grid
 tests/
   app.rs                        # Rust integration tests for the WASM exports
 ```

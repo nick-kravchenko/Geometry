@@ -20,6 +20,9 @@ export interface Controls {
   diagonal: boolean,
   overlay: boolean,
   overlayAvailable: boolean,
+  map: string,
+  procedural: boolean, // whether the map can generate a new layout
+  uiHidden: boolean, // legend and controls hidden, so they don't cover the map
 }
 
 export function render(
@@ -33,7 +36,6 @@ export function render(
   overlay: GraphOverlay | null,
   cellWidth: number,
   cellHeight: number,
-  cellsY: number,
   squares: Rectangle[],
 ): void {
   if (!ctx) return;
@@ -42,7 +44,9 @@ export function render(
   ctx.fillStyle = COLORS.field;
   ctx.fillRect(0, 0, w, h);
 
-  ctx.font = `300 ${(h / cellsY) * .25}px/${(h / cellsY) * .25}px "JetBrains Mono", sans-serif`;
+  // cell coordinates on obstacles, where cells are large enough to hold them
+  const showLabels: boolean = cellWidth >= 45;
+  ctx.font = `300 ${cellHeight * .25}px/${cellHeight * .25}px "JetBrains Mono", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const square of squares) {
@@ -54,12 +58,12 @@ export function render(
     ctx.fillRect(x, y, width, height);
     ctx.strokeRect(x, y, width, height);
     ctx.fillStyle = COLORS.obstacleLabel;
-    ctx.fillText(`${~~x / cellWidth},${~~y / cellHeight}`, x + width * .5, y + height * .5);
+    if (showLabels) ctx.fillText(`${~~(x / cellWidth)},${~~(y / cellHeight)}`, x + width * .5, y + height * .5);
   }
 
-  const circleSize = Math.min(cellWidth, cellHeight) * .25;
+  const circleSize = 12;
 
-  if (overlay) renderGraphOverlay(ctx, overlay, Math.min(cellWidth, cellHeight) * .06);
+  if (overlay) renderGraphOverlay(ctx, overlay, 3);
 
   // in legend order, which puts wider paths first, so overlapping paths stay visible
   for (const layer of layers) {
@@ -84,8 +88,12 @@ export function render(
   ctx.fill();
   ctx.stroke();
 
-  renderLegend(ctx, legendFontSize(cellHeight), layers);
-  renderControls(ctx, w, legendFontSize(cellHeight), controls);
+  if (controls.uiHidden) {
+    renderShowUiButton(ctx, w, LEGEND_FONT_SIZE);
+    return;
+  }
+  renderLegend(ctx, LEGEND_FONT_SIZE, layers);
+  renderControls(ctx, w, LEGEND_FONT_SIZE, controls);
 }
 
 function strokePolyline(ctx: CanvasRenderingContext2D, points: Point[], color: string, width: number): void {
@@ -99,9 +107,8 @@ function strokePolyline(ctx: CanvasRenderingContext2D, points: Point[], color: s
   ctx.stroke();
 }
 
-export function legendFontSize(cellHeight: number): number {
-  return cellHeight * .3;
-}
+// font size of the legend and the controls panel, in canvas pixels
+export const LEGEND_FONT_SIZE: number = 16;
 
 function legendRowY(fontSize: number, row: number): number {
   return fontSize * (1 + row * 1.5);
@@ -140,14 +147,24 @@ function renderLegend(ctx: CanvasRenderingContext2D, fontSize: number, layers: P
   ctx.globalAlpha = 1;
 }
 
-const CONTROL_ROWS: string[] = ['000 FPS · 000.0 ms/frame', '[ ] Diagonal (D)', '[ ] Graph overlay (G)', 'Drag to move the end point'];
-const CHECKBOX_ROWS: { control: Control, label: string, row: number }[] = [
+const CONTROL_ROWS: string[] = [
+  '000 FPS · 000.0 ms/frame', '[ ] Diagonal (D)', '[ ] Graph overlay (G)', '▸ Map: Scatter (M)', '↻ New layout (R)', '◱ Hide UI (H)',
+  'Drag to move the end point',
+];
+const CHECKBOX_ROWS: { control: 'diagonal' | 'overlay', label: string, row: number }[] = [
   { control: 'diagonal', label: 'Diagonal (D)', row: 1 },
   { control: 'overlay', label: 'Graph overlay (G)', row: 2 },
 ];
-const HINT_ROW: number = 3;
+const MAP_ROW: number = 3;
+const LAYOUT_ROW: number = 4;
+const HIDE_ROW: number = 5;
+const HINT_ROW: number = 6;
+const CLICKABLE_ROWS: { control: Control, row: number }[] = [
+  ...CHECKBOX_ROWS, { control: 'map', row: MAP_ROW }, { control: 'layout', row: LAYOUT_ROW }, { control: 'ui', row: HIDE_ROW },
+];
+const SHOW_UI_LABEL: string = '◱ Show UI (H)';
 
-export type Control = 'diagonal' | 'overlay';
+export type Control = 'diagonal' | 'overlay' | 'map' | 'layout' | 'ui';
 
 // panel in the top-right corner, sized for the widest row it can show
 function controlsLeft(ctx: CanvasRenderingContext2D, w: number, fontSize: number): number {
@@ -155,10 +172,14 @@ function controlsLeft(ctx: CanvasRenderingContext2D, w: number, fontSize: number
   return w - fontSize * 2 - Math.max(...CONTROL_ROWS.map((row: string) => ctx.measureText(row).width));
 }
 
-// The checkbox at canvas point (x, y), or null.
-export function controlAt(ctx: CanvasRenderingContext2D, w: number, fontSize: number, [x, y]: Point): Control | null {
+// The control at canvas point (x, y), or null. With the UI hidden, only the button that shows it again.
+export function controlAt(ctx: CanvasRenderingContext2D, w: number, fontSize: number, [x, y]: Point, uiHidden: boolean): Control | null {
+  if (uiHidden) {
+    const [left, , , height] = showUiButton(ctx, w, fontSize);
+    return x >= left && y <= height ? 'ui' : null;
+  }
   if (x < controlsLeft(ctx, w, fontSize) - fontSize) return null;
-  const hit = CHECKBOX_ROWS.find(({ row }) => Math.abs(y - legendRowY(fontSize, row)) <= fontSize * .75);
+  const hit = CLICKABLE_ROWS.find(({ row }) => Math.abs(y - legendRowY(fontSize, row)) <= fontSize * .75);
   return hit ? hit.control : null;
 }
 
@@ -181,6 +202,13 @@ function renderControls(ctx: CanvasRenderingContext2D, w: number, fontSize: numb
     if (controls[control]) ctx.fillRect(left + box * .2, rowY - box * .3, box * .6, box * .6);
     ctx.fillText(label, left + box + fontSize * .5, rowY);
   }
+
+  ctx.globalAlpha = 1;
+  ctx.fillText(`▸ Map: ${controls.map} (M)`, left, legendRowY(fontSize, MAP_ROW));
+  ctx.globalAlpha = controls.procedural ? 1 : .35; // a fixed map has a single layout
+  ctx.fillText('↻ New layout (R)', left, legendRowY(fontSize, LAYOUT_ROW));
+  ctx.globalAlpha = 1;
+  ctx.fillText(CONTROL_ROWS[HIDE_ROW], left, legendRowY(fontSize, HIDE_ROW));
 
   ctx.globalAlpha = .7;
   ctx.fillText(CONTROL_ROWS[HINT_ROW], left, legendRowY(fontSize, HINT_ROW));
@@ -223,4 +251,20 @@ function drawPanel(ctx: CanvasRenderingContext2D, x: number, y: number, width: n
   ctx.strokeStyle = COLORS.panelBorder;
   ctx.lineWidth = 1;
   ctx.strokeRect(x + .5, y - .5, width - 1, height);
+}
+
+// [left, top, width, height] of the small button shown while the UI is hidden
+function showUiButton(ctx: CanvasRenderingContext2D, w: number, fontSize: number): [number, number, number, number] {
+  ctx.font = `300 ${fontSize}px/${fontSize}px "JetBrains Mono", sans-serif`;
+  const width: number = ctx.measureText(SHOW_UI_LABEL).width + fontSize * 2;
+  return [w - width, 0, width, fontSize * 2];
+}
+
+function renderShowUiButton(ctx: CanvasRenderingContext2D, w: number, fontSize: number): void {
+  const [left, top, width, height] = showUiButton(ctx, w, fontSize);
+  drawPanel(ctx, left, top, width, height);
+  ctx.fillStyle = COLORS.text;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(SHOW_UI_LABEL, left + fontSize, top + height / 2);
 }

@@ -1,4 +1,4 @@
-import { getData } from '../get-data';
+import { buildField, Field, getCanvas } from '../get-data';
 import { Point } from '../geometry';
 import {
   aStarSearch,
@@ -9,19 +9,23 @@ import {
   visibilityGraph,
   visibilityGraphSearch,
 } from '../pathfinding';
+import { DEFAULT_SEED, MAPS } from '../maps';
 import { clamp, getCoordinatesByMouseEvent } from '../utils';
 import { COLORS, wasmPathColor } from './palette';
-import { controlAt, GraphOverlay, legendFontSize, legendRowAt, PathLayer, render } from './render';
+import { controlAt, GraphOverlay, LEGEND_FONT_SIZE, legendRowAt, PathLayer, render } from './render';
 
 // weight of the newest frame in the timings shown in the legend; smooths frame-to-frame noise
 const SMOOTHING: number = .1;
 
-// Demo settings remembered between visits; the end point is not, it always starts at its default.
+// Demo settings remembered between visits; the end point and a map's random layout are not,
+// they always start at their defaults.
 const SETTINGS_KEY: string = 'geometry-demo-settings';
 
 interface Settings {
+  map: string, // map name
   diagonal: boolean,
   overlay: boolean, // visibility graph overlay
+  uiHidden: boolean,
   hidden: string[], // labels of hidden algorithms
 }
 
@@ -29,12 +33,14 @@ function loadSettings(): Settings {
   try {
     const settings: Partial<Settings> = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
     return {
+      map: typeof settings.map === 'string' ? settings.map : MAPS[0].name,
       diagonal: settings.diagonal === true,
       overlay: settings.overlay === true,
+      uiHidden: settings.uiHidden === true,
       hidden: Array.isArray(settings.hidden) ? settings.hidden.filter((label: unknown) => typeof label === 'string') : [],
     };
   } catch {
-    return { diagonal: false, overlay: false, hidden: [] }; // storage blocked or unreadable: use the defaults
+    return { map: MAPS[0].name, diagonal: false, overlay: false, uiHidden: false, hidden: [] }; // storage blocked or unreadable: use the defaults
   }
 }
 
@@ -58,30 +64,33 @@ function start(module: typeof import('pkg')): void {
     Pathfinder,
     wasm_memory,
   } = module;
-  const {
-    canvasElement,
-    ctx,
-    w,
-    h,
-    startPointNumber,
-    startPointCoordinates,
-    endPointNumber,
-    endPointCoordinates,
-    blockedCellsUint8Array,
-    cellsY,
-    cellHeight,
-    cellWidth,
-    squares,
-  } = getData();
+  const { canvasElement, ctx, w, h } = getCanvas();
   if (!ctx) return;
-  const fontSize: number = legendFontSize(cellHeight);
-
-  // the WASM searches read the grid in place: write it straight into WASM memory, as a game would every frame
+  const fontSize: number = LEGEND_FONT_SIZE;
   const pathfinder = new Pathfinder(w, h);
-  new Uint8Array(wasm_memory().buffer, pathfinder.cells_ptr(), w * h).set(blockedCellsUint8Array);
+  const settings: Settings = loadSettings();
 
-  const grid: Uint8Array = blockedCellsUint8Array;
-  const from: number = startPointNumber;
+  // the current map; the searches below read these, so switching maps just replaces them
+  let mapIndex: number = Math.max(0, MAPS.findIndex(({ name }) => name === settings.map));
+  let seed: number = DEFAULT_SEED;
+  let field: Field;
+  let grid: Uint8Array;
+  let from: number;
+  let end: number;
+  let endCoordinates: Point;
+  // obstacles only change with the map, so their outlines are traced once per map, on first use
+  let outlines: [Point, Point][] | null;
+  const loadMap = (): void => {
+    field = buildField(MAPS[mapIndex].generate(seed), w, h);
+    grid = field.blockedCellsUint8Array;
+    from = field.startPointNumber;
+    end = field.endPointNumber;
+    endCoordinates = field.endPointCoordinates;
+    outlines = null;
+    // the WASM searches read the grid in place: write it straight into WASM memory, as a game would every frame
+    new Uint8Array(wasm_memory().buffer, pathfinder.cells_ptr(), w * h).set(grid);
+  };
+  loadMap();
   // waypoints: WASM returns them flat as [x0, y0, x1, y1, ...]
   const toPoints = (flat: Float64Array): Point[] => Array.from({ length: flat.length / 2 }, (_: unknown, i: number): Point => [flat[2 * i], flat[2 * i + 1]]);
   // label, color, path width, search, and whether the algorithm only makes sense with diagonal movement
@@ -112,20 +121,20 @@ function start(module: typeof import('pkg')): void {
       points: visibilityGraphSearch(grid, w, h, from, end),
     }), true],
   ];
-  const settings: Settings = loadSettings();
   const layers: PathLayer[] = algorithms.map(([label, color, size, , diagonalOnly = false]): PathLayer => ({
     label, color, size, time: NaN, visible: !settings.hidden.includes(label), enabled: !diagonalOnly || settings.diagonal,
   }));
   const save = (): void => saveSettings({
+    map: MAPS[mapIndex].name,
     diagonal,
     overlay,
+    uiHidden,
     hidden: layers.filter(({ visible }: PathLayer) => !visible).map(({ label }: PathLayer) => label),
   });
 
   let diagonal: boolean = settings.diagonal;
   let overlay: boolean = settings.overlay;
-  // obstacles never move in this demo, so their outlines are traced once, on first use
-  let outlines: [Point, Point][] | null = null;
+  let uiHidden: boolean = settings.uiHidden;
   // the overlay shows the graph the visibility graph searches, so only while that algorithm runs
   const graphOverlay = (): GraphOverlay | null => {
     if (!overlay || !diagonal) return null;
@@ -133,8 +142,6 @@ function start(module: typeof import('pkg')): void {
     return { outlines, ...visibilityGraph(grid, w, h, [from, end]) };
   };
   let fps: string = '– FPS';
-  let end: number = endPointNumber;
-  let endCoordinates: Point = endPointCoordinates;
 
   // Every frame searches again with every visible algorithm, as a game would while things move;
   // hidden algorithms are skipped, so hiding the slow ones raises the frame rate.
@@ -164,7 +171,8 @@ function start(module: typeof import('pkg')): void {
 
   function frame(now: number): void {
     search();
-    render(ctx, w, h, startPointCoordinates, endCoordinates, layers, { fps, diagonal, overlay, overlayAvailable: diagonal }, graphOverlay(), cellWidth, cellHeight, cellsY, squares);
+    const controls = { fps, diagonal, overlay, overlayAvailable: diagonal, map: MAPS[mapIndex].name, procedural: MAPS[mapIndex].procedural, uiHidden };
+    render(ctx, w, h, field.startPointCoordinates, endCoordinates, layers, controls, graphOverlay(), field.cellWidth, field.cellHeight, field.squares);
     updateFps(now);
     requestAnimationFrame(frame);
   }
@@ -183,9 +191,33 @@ function start(module: typeof import('pkg')): void {
     overlay = !overlay;
     save();
   };
+  const resetTimes = (): void => {
+    for (const layer of layers) layer.time = NaN; // timings on another map would skew the average
+  };
+  const nextMap = (): void => {
+    mapIndex = (mapIndex + 1) % MAPS.length;
+    seed = DEFAULT_SEED;
+    loadMap();
+    resetTimes();
+    save();
+  };
+  const newLayout = (): void => {
+    if (!MAPS[mapIndex].procedural) return;
+    seed = 1 + ~~(Math.random() * 0x7fffffff);
+    loadMap();
+    resetTimes();
+  };
+  const toggleUi = (): void => {
+    uiHidden = !uiHidden;
+    save();
+  };
   window.addEventListener('keydown', (event: KeyboardEvent) => {
-    if (event.key === 'd' || event.key === 'D') toggleDiagonal();
-    if (event.key === 'g' || event.key === 'G') toggleOverlay();
+    const key: string = event.key.toLowerCase();
+    if (key === 'd') toggleDiagonal();
+    if (key === 'g') toggleOverlay();
+    if (key === 'm') nextMap();
+    if (key === 'r') newLayout();
+    if (key === 'h') toggleUi();
   });
 
   // Pressing on a control or the legend acts on it; pressing anywhere else drags the end point.
@@ -199,11 +231,14 @@ function start(module: typeof import('pkg')): void {
   };
   canvasElement.addEventListener('pointerdown', (event: PointerEvent) => {
     const point: Point = getCoordinatesByMouseEvent(canvasElement, event);
-    const control = controlAt(ctx, w, fontSize, point);
+    const control = controlAt(ctx, w, fontSize, point, uiHidden);
     if (control === 'diagonal') toggleDiagonal();
     if (control === 'overlay') toggleOverlay();
+    if (control === 'map') nextMap();
+    if (control === 'layout') newLayout();
+    if (control === 'ui') toggleUi();
     if (control) return;
-    const row: number = legendRowAt(ctx, fontSize, layers, point);
+    const row: number = uiHidden ? -1 : legendRowAt(ctx, fontSize, layers, point);
     if (row !== -1) {
       if (!layers[row].enabled) return; // not available in this mode
       layers[row].visible = !layers[row].visible;
